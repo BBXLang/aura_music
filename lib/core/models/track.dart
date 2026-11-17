@@ -14,6 +14,8 @@ class Track {
     required this.colors,
     required this.lyrics,
     this.liked = false,
+    this.localPath,
+    this.streamUrl,
   });
 
   final String id;
@@ -26,6 +28,49 @@ class Track {
   final List<Color> colors;
   final List<String> lyrics;
   final bool liked;
+  final String? localPath;
+  final String? streamUrl;
+
+  /// Creates a [Track] from a JSON map.
+  factory Track.fromJson(Map<String, dynamic> json) {
+    final rawColors = json['colors'] as List<dynamic>? ?? const [];
+    final rawLyrics = json['lyrics'] as List<dynamic>? ?? const [];
+    return Track(
+      id: json['id'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      artist: json['artist'] as String? ?? '',
+      album: json['album'] as String? ?? '',
+      quality: json['quality'] as String? ?? 'SQ',
+      sourceId: json['sourceId'] as String? ?? 'local',
+      durationSeconds: (json['durationSeconds'] as num?)?.toInt() ?? 0,
+      colors: rawColors
+          .whereType<num>()
+          .map((value) => Color(value.toInt()))
+          .toList(),
+      lyrics: rawLyrics.map((line) => line.toString()).toList(),
+      liked: json['liked'] as bool? ?? false,
+      localPath: json['localPath'] as String?,
+      streamUrl: json['streamUrl'] as String?,
+    );
+  }
+
+  /// Serializes this [Track] to a JSON-compatible map.
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'artist': artist,
+      'album': album,
+      'quality': quality,
+      'sourceId': sourceId,
+      'durationSeconds': durationSeconds,
+      'colors': colors.map((color) => color.toARGB32()).toList(),
+      'lyrics': lyrics,
+      'liked': liked,
+      if (localPath != null) 'localPath': localPath,
+      if (streamUrl != null) 'streamUrl': streamUrl,
+    };
+  }
 
   /// Returns duration formatted as `mm:ss`.
   String get formattedDuration {
@@ -47,6 +92,8 @@ class Track {
     List<Color>? colors,
     List<String>? lyrics,
     bool? liked,
+    String? localPath,
+    String? streamUrl,
   }) {
     return Track(
       id: id ?? this.id,
@@ -59,6 +106,8 @@ class Track {
       colors: colors ?? this.colors,
       lyrics: lyrics ?? this.lyrics,
       liked: liked ?? this.liked,
+      localPath: localPath ?? this.localPath,
+      streamUrl: streamUrl ?? this.streamUrl,
     );
   }
 }

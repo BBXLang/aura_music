@@ -15,6 +15,28 @@ class SourcePlugin {
   final bool connected;
   final String tierLabel;
 
+  /// Creates a [SourcePlugin] from a JSON map.
+  factory SourcePlugin.fromJson(Map<String, dynamic> json) {
+    return SourcePlugin(
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      version: json['version'] as String? ?? 'v1.0.0',
+      connected: json['connected'] as bool? ?? false,
+      tierLabel: json['tierLabel'] as String? ?? '',
+    );
+  }
+
+  /// Serializes this [SourcePlugin] to a JSON-compatible map.
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'version': version,
+      'connected': connected,
+      'tierLabel': tierLabel,
+    };
+  }
+
   /// Returns a copy of this plugin with the specified fields replaced.
   SourcePlugin copyWith({
     String? id,
