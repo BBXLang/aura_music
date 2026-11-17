@@ -1,11 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../audio/audio_engine.dart';
 import '../audio/ohos_audio_bridge.dart';
 import '../models/playlist.dart';
 import '../models/source_plugin.dart';
 import '../models/track.dart';
+import '../playlist/playlist_codec.dart';
 import '../scanner/local_music_scanner.dart';
+import '../source/js_plugin_bridge.dart';
+import '../storage/app_storage.dart';
 
 /// Immutable snapshot of a previously active playback queue.
 class QueueSnapshot {
@@ -134,14 +140,117 @@ class PlayerState {
 /// Manages AuraMusic playback, queue history, playlists, and native bridges.
 class PlayerNotifier extends StateNotifier<PlayerState> {
   /// Creates a [PlayerNotifier] with default catalog, playlists, and sources.
-  PlayerNotifier({OhosAudioBridge? audioBridge})
-    : _audioBridge = audioBridge ?? const OhosAudioBridge(),
-      super(_createInitialState());
+  PlayerNotifier({
+    OhosAudioBridge? audioBridge,
+    AudioEngineAdapter? audioEngine,
+    AppStorage? storage,
+  }) : _audioBridge = audioBridge ?? const OhosAudioBridge(),
+       _audioEngine = audioEngine ?? NoopAudioEngine(),
+       _storage = storage ?? AppStorage.memory(),
+       super(_createInitialState());
 
   static const int _maxRecentQueues = 3;
   static const int _maxPlayHistory = 50;
 
   final OhosAudioBridge _audioBridge;
+  final AudioEngineAdapter _audioEngine;
+  final AppStorage _storage;
+
+  StreamSubscription<Duration>? _positionSub;
+  StreamSubscription<Duration>? _durationSub;
+  StreamSubscription<void>? _completedSub;
+  Duration? _activeDuration;
+  bool _initialized = false;
+
+  /// Loads persisted state from [AppStorage] and subscribes to [AudioEngineAdapter] streams.
+  Future<void> init() async {
+    if (_initialized) return;
+    _initialized = true;
+
+    final savedPlaylists = _storage.loadPlaylists();
+    final savedHistory = _storage.loadPlayHistory();
+    final savedQueues = _storage.loadRecentQueues();
+    final savedSources = _storage.loadSources();
+    final savedSettings = _storage.loadSettings();
+
+    state = state.copyWith(
+      playlists: savedPlaylists != null
+          ? List<Playlist>.unmodifiable(savedPlaylists)
+          : null,
+      playHistory: savedHistory != null
+          ? List<PlayHistoryEntry>.unmodifiable(
+              savedHistory.map(
+                (entry) => PlayHistoryEntry(
+                  trackId: entry['trackId'] ?? '',
+                  timestampLabel: entry['timestampLabel'] ?? '',
+                ),
+              ),
+            )
+          : null,
+      recentQueues: savedQueues != null
+          ? List<QueueSnapshot>.unmodifiable(
+              savedQueues.map(
+                (entry) => QueueSnapshot(
+                  name: entry['name'] as String? ?? '',
+                  trackIds: ((entry['trackIds'] as List<dynamic>?) ?? const [])
+                      .map((id) => id.toString())
+                      .toList(growable: false),
+                  queuePos: entry['queuePos'] as int? ?? 0,
+                ),
+              ),
+            )
+          : null,
+      sources: savedSources != null
+          ? List<SourcePlugin>.unmodifiable(savedSources)
+          : null,
+      ambientEnabled: savedSettings?.ambientEnabled,
+      isDark: savedSettings?.isDark,
+      desktopLyrics: savedSettings?.desktopLyrics,
+      smartLocalFilter: savedSettings?.smartLocalFilter,
+      playMode: savedSettings?.playMode,
+      quality: savedSettings?.quality,
+    );
+
+    _durationSub = _audioEngine.durationStream.listen((duration) {
+      if (duration > Duration.zero) {
+        _activeDuration = duration;
+      }
+    });
+
+    _positionSub = _audioEngine.positionStream.listen(_handlePositionUpdate);
+    _completedSub = _audioEngine.onCompleted.listen((_) {
+      nextTrack(auto: true);
+    });
+  }
+
+  void _handlePositionUpdate(Duration position) {
+    if (!state.isPlaying) return;
+    final track = state.currentTrack;
+    final totalMs =
+        (_activeDuration != null && _activeDuration!.inMilliseconds > 0)
+        ? _activeDuration!.inMilliseconds
+        : (track?.durationSeconds ?? 0) * 1000;
+    if (totalMs <= 0) return;
+
+    final nextProgress = (position.inMilliseconds / totalMs).clamp(0.0, 1.0);
+    var lyricIndex = state.activeLyric;
+    if (track != null && track.lyrics.isNotEmpty) {
+      lyricIndex = (nextProgress * track.lyrics.length).floor().clamp(
+        0,
+        track.lyrics.length - 1,
+      );
+    }
+
+    state = state.copyWith(progress: nextProgress, activeLyric: lyricIndex);
+  }
+
+  @override
+  void dispose() {
+    _positionSub?.cancel();
+    _durationSub?.cancel();
+    _completedSub?.cancel();
+    super.dispose();
+  }
 
   static PlayerState _createInitialState() {
     final initialIds = sampleTracks.map((t) => t.id).toList(growable: false);
@@ -235,6 +344,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     );
 
     _syncNativeTrackStart(track);
+    _persistHistory();
   }
 
   /// Toggles play/pause state for the current track.
@@ -244,6 +354,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     state = state.copyWith(isPlaying: nextPlaying);
 
     if (nextPlaying) {
+      unawaited(_audioEngine.resume());
       final track = state.currentTrack;
       if (track != null) {
         _audioBridge.resume();
@@ -253,6 +364,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
         );
       }
     } else {
+      unawaited(_audioEngine.pause());
       _audioBridge.pause();
       final track = state.currentTrack;
       if (track != null) {
@@ -275,6 +387,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
 
     if (auto && state.playMode == PlayMode.playOnce) {
       state = state.copyWith(isPlaying: false, progress: 0.0, activeLyric: 0);
+      unawaited(_audioEngine.pause());
       _audioBridge.pause();
       return;
     }
@@ -296,6 +409,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     if (track != null) {
       _syncNativeTrackStart(track);
     }
+    _persistHistory();
   }
 
   /// Moves to the previous track in the queue, wrapping around if needed.
@@ -317,6 +431,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     if (track != null) {
       _syncNativeTrackStart(track);
     }
+    _persistHistory();
   }
 
   /// Seeks playback progress to [value] (clamped to `0.0..1.0`).
@@ -335,6 +450,17 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     state = state.copyWith(progress: clamped, activeLyric: lyricIndex);
 
     if (track != null) {
+      final totalMs =
+          (_activeDuration != null && _activeDuration!.inMilliseconds > 0)
+          ? _activeDuration!.inMilliseconds
+          : track.durationSeconds * 1000;
+      if (totalMs > 0) {
+        unawaited(
+          _audioEngine.seek(
+            Duration(milliseconds: (totalMs * clamped).round()),
+          ),
+        );
+      }
       final posSeconds = (track.durationSeconds * clamped).round();
       _audioBridge.seek(posSeconds);
       if (state.desktopLyrics && track.lyrics.isNotEmpty) {
@@ -353,6 +479,17 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
 
     state = state.copyWith(activeLyric: clampedIndex, progress: nextProgress);
 
+    final totalMs =
+        (_activeDuration != null && _activeDuration!.inMilliseconds > 0)
+        ? _activeDuration!.inMilliseconds
+        : track.durationSeconds * 1000;
+    if (totalMs > 0) {
+      unawaited(
+        _audioEngine.seek(
+          Duration(milliseconds: (totalMs * nextProgress).round()),
+        ),
+      );
+    }
     final posSeconds = (track.durationSeconds * nextProgress).round();
     _audioBridge.seek(posSeconds);
     if (state.desktopLyrics) {
@@ -381,12 +518,14 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     final modes = PlayMode.values;
     final nextMode = modes[(state.playMode.index + 1) % modes.length];
     state = state.copyWith(playMode: nextMode);
+    _persistSettings();
   }
 
   /// Sets the preferred [AudioQuality] tier.
   void setQuality(AudioQuality q) {
     state = state.copyWith(quality: q);
     _audioBridge.setQuality(q);
+    _persistSettings();
   }
 
   /// Reorders an item inside the current queue without replacing the playlist.
@@ -427,6 +566,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
         progress: 0.0,
         activeLyric: 0,
       );
+      unawaited(_audioEngine.pause());
       _audioBridge.pause();
       return;
     }
@@ -482,7 +622,9 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       if (track != null) {
         _syncNativeTrackStart(track);
       }
+      _persistHistory();
     }
+    _persistRecentQueues();
   }
 
   /// Restores the queue snapshot at [recentIndex] from [PlayerState.recentQueues].
@@ -527,7 +669,9 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       if (track != null) {
         _syncNativeTrackStart(track);
       }
+      _persistHistory();
     }
+    _persistRecentQueues();
   }
 
   /// Creates a new user playlist named [name].
@@ -545,6 +689,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     state = state.copyWith(
       playlists: List<Playlist>.unmodifiable([...state.playlists, created]),
     );
+    _persistPlaylists();
   }
 
   /// Imports an external playlist with [name] and [trackIds].
@@ -562,6 +707,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     state = state.copyWith(
       playlists: List<Playlist>.unmodifiable([...state.playlists, imported]),
     );
+    _persistPlaylists();
   }
 
   /// Scans simulated local audio candidates using [LocalMusicScanner] and
@@ -646,6 +792,145 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       tracks: List<Track>.unmodifiable([...state.tracks, ...discoveredTracks]),
       playlists: List<Playlist>.unmodifiable(updatedPlaylists),
     );
+    _persistPlaylists();
+  }
+
+  /// Scans real device [directories] (or [LocalMusicScanner.defaultMusicDirectories])
+  /// for local audio files, adds newly discovered tracks to the library and
+  /// `pl_local` playlist, persists, and returns the scanned track count.
+  Future<int> scanLocalMusicReal({List<String>? directories}) async {
+    final dirs = directories ?? LocalMusicScanner.defaultMusicDirectories();
+    final scanned = await LocalMusicScanner.scanDirectories(
+      dirs,
+      smartFilter: state.smartLocalFilter,
+    );
+
+    final existingIds = state.tracks.map((t) => t.id).toSet();
+    final newTracks = scanned
+        .where((t) => !existingIds.contains(t.id))
+        .toList(growable: false);
+
+    final existingLocalIds = state.tracks
+        .where((t) => t.sourceId == 'local')
+        .map((t) => t.id)
+        .toList();
+    final scannedIds = scanned.map((t) => t.id).toList();
+    final combinedLocalIds = {
+      ...existingLocalIds,
+      ...scannedIds,
+    }.toList(growable: false);
+
+    final updatedPlaylists = state.playlists
+        .map(
+          (pl) => pl.id == 'pl_local'
+              ? pl.copyWith(trackIds: combinedLocalIds)
+              : pl,
+        )
+        .toList(growable: false);
+
+    state = state.copyWith(
+      tracks: List<Track>.unmodifiable([...state.tracks, ...newTracks]),
+      playlists: List<Playlist>.unmodifiable(updatedPlaylists),
+    );
+    await _storage.savePlaylists(state.playlists);
+    return scanned.length;
+  }
+
+  /// Parses an M3U or JSON playlist string [raw], adds any new tracks and the
+  /// imported playlist to state, and persists to storage.
+  Future<bool> importPlaylistRaw(String raw) async {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return false;
+
+    ({String name, List<Track> tracks}) parsed;
+    try {
+      parsed = trimmed.startsWith('{')
+          ? PlaylistCodec.parseJson(trimmed)
+          : PlaylistCodec.parseM3u(trimmed);
+    } catch (_) {
+      return false;
+    }
+
+    if (parsed.tracks.isEmpty) return false;
+
+    final existingIds = state.tracks.map((t) => t.id).toSet();
+    final newTracks = parsed.tracks
+        .where((t) => !existingIds.contains(t.id))
+        .toList(growable: false);
+
+    final imported = Playlist(
+      id: 'pl_imported_${state.playlists.length + 1}',
+      name: parsed.name,
+      type: PlaylistType.imported,
+      trackIds: List<String>.unmodifiable(
+        parsed.tracks.map((t) => t.id).toList(growable: false),
+      ),
+    );
+
+    state = state.copyWith(
+      tracks: List<Track>.unmodifiable([...state.tracks, ...newTracks]),
+      playlists: List<Playlist>.unmodifiable([...state.playlists, imported]),
+    );
+    await _storage.savePlaylists(state.playlists);
+    return true;
+  }
+
+  /// Parses a community JS plugin script or JSON manifest [jsOrJson], adds or
+  /// updates the corresponding [SourcePlugin], and persists to storage.
+  Future<bool> importPluginScript(String jsOrJson) async {
+    final trimmed = jsOrJson.trim();
+    if (trimmed.isEmpty) return false;
+
+    CommunityPluginManifest manifest;
+    try {
+      manifest = CommunityPluginManifest.parse(trimmed);
+    } catch (_) {
+      return false;
+    }
+
+    final existingIndex = state.sources.indexWhere((s) => s.id == manifest.id);
+    final plugin = SourcePlugin(
+      id: manifest.id,
+      name: manifest.name,
+      version: manifest.version,
+      connected: existingIndex >= 0
+          ? state.sources[existingIndex].connected
+          : false,
+      tierLabel: manifest.apiBase.isNotEmpty ? 'JS 插件 · HTTP' : 'JS 插件',
+    );
+
+    final updatedSources = List<SourcePlugin>.from(state.sources);
+    if (existingIndex >= 0) {
+      updatedSources[existingIndex] = plugin;
+    } else {
+      updatedSources.add(plugin);
+    }
+
+    state = state.copyWith(
+      sources: List<SourcePlugin>.unmodifiable(updatedSources),
+    );
+    await _storage.saveSources(state.sources);
+    return true;
+  }
+
+  /// Marks [sourceId] as OAuth-authorized and optionally persists [token].
+  Future<void> authorizeOAuth(String sourceId, {String? token}) async {
+    final updated = state.sources
+        .map(
+          (source) =>
+              source.id == sourceId ? source.copyWith(connected: true) : source,
+        )
+        .toList(growable: false);
+    state = state.copyWith(sources: List<SourcePlugin>.unmodifiable(updated));
+    await _storage.saveSources(state.sources);
+
+    if (token != null && token.trim().isNotEmpty) {
+      final existingTokens = Map<String, String>.from(
+        _storage.loadOAuthTokens() ?? const {},
+      );
+      existingTokens[sourceId] = token.trim();
+      await _storage.saveOAuthTokens(existingTokens);
+    }
   }
 
   /// Toggles OAuth connection status for the source plugin with [sourceId].
@@ -657,12 +942,14 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
               : source,
         )
         .toList(growable: false);
-    state = state.copyWith(sources: updated);
+    state = state.copyWith(sources: List<SourcePlugin>.unmodifiable(updated));
+    _persistSources();
   }
 
   /// Toggles ambient background color glow.
   void toggleAmbient() {
     state = state.copyWith(ambientEnabled: !state.ambientEnabled);
+    _persistSettings();
   }
 
   /// Toggles HarmonyOS desktop floating lyrics window.
@@ -678,16 +965,19 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
         ? track.lyrics[state.activeLyric]
         : null;
     _audioBridge.setDesktopLyricsEnabled(nextValue, currentLyric: line);
+    _persistSettings();
   }
 
   /// Toggles dark/light theme mode.
   void toggleTheme() {
     state = state.copyWith(isDark: !state.isDark);
+    _persistSettings();
   }
 
   /// Toggles smart local audio filtering.
   void toggleSmartLocalFilter() {
     state = state.copyWith(smartLocalFilter: !state.smartLocalFilter);
+    _persistSettings();
   }
 
   Track? _findTrack(String trackId) {
@@ -702,12 +992,66 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
   }
 
   void _syncNativeTrackStart(Track track) {
+    _activeDuration = null;
+    if (track.localPath != null && track.localPath!.isNotEmpty) {
+      unawaited(_audioEngine.playFile(track.localPath!));
+    } else if (track.streamUrl != null && track.streamUrl!.isNotEmpty) {
+      unawaited(_audioEngine.playUrl(track.streamUrl!));
+    }
     _audioBridge.playTrack(track, quality: state.quality);
     _audioBridge.updateMetadata(track);
     _audioBridge.updatePlaybackState(isPlaying: true, positionSeconds: 0);
     if (state.desktopLyrics && track.lyrics.isNotEmpty) {
       _audioBridge.updateDesktopLyricLine(track.lyrics.first);
     }
+  }
+
+  void _persistPlaylists() {
+    unawaited(_storage.savePlaylists(state.playlists));
+  }
+
+  void _persistHistory() {
+    final encoded = state.playHistory
+        .map(
+          (entry) => {
+            'trackId': entry.trackId,
+            'timestampLabel': entry.timestampLabel,
+          },
+        )
+        .toList(growable: false);
+    unawaited(_storage.savePlayHistory(encoded));
+  }
+
+  void _persistRecentQueues() {
+    final encoded = state.recentQueues
+        .map(
+          (q) => {
+            'name': q.name,
+            'trackIds': q.trackIds,
+            'queuePos': q.queuePos,
+          },
+        )
+        .toList(growable: false);
+    unawaited(_storage.saveRecentQueues(encoded));
+  }
+
+  void _persistSources() {
+    unawaited(_storage.saveSources(state.sources));
+  }
+
+  void _persistSettings() {
+    unawaited(
+      _storage.saveSettings(
+        AppSettings(
+          ambientEnabled: state.ambientEnabled,
+          isDark: state.isDark,
+          desktopLyrics: state.desktopLyrics,
+          smartLocalFilter: state.smartLocalFilter,
+          playMode: state.playMode,
+          quality: state.quality,
+        ),
+      ),
+    );
   }
 
   List<PlayHistoryEntry> _recordHistory(
@@ -724,9 +1068,20 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
   }
 }
 
+/// Riverpod provider for the active [AudioEngineAdapter].
+final audioEngineProvider = Provider<AudioEngineAdapter>(
+  (ref) => NoopAudioEngine(),
+);
+
+/// Riverpod provider for the active [AppStorage].
+final appStorageProvider = Provider<AppStorage>((ref) => AppStorage.memory());
+
 /// Global Riverpod provider for [PlayerNotifier] and [PlayerState].
 final playerProvider = StateNotifierProvider<PlayerNotifier, PlayerState>((
   ref,
 ) {
-  return PlayerNotifier();
+  return PlayerNotifier(
+    audioEngine: ref.watch(audioEngineProvider),
+    storage: ref.watch(appStorageProvider),
+  );
 });

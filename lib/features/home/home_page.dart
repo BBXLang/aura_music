@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/playlist.dart';
 import '../../core/models/track.dart';
+import '../../core/playlist/playlist_codec.dart';
 import '../../core/state/player_provider.dart';
 import '../../design_system/cover_art.dart';
 import '../../design_system/squircle_border.dart';
@@ -143,12 +145,7 @@ class HomePage extends ConsumerWidget {
               label: '扫描本地',
               primaryColor: primaryColor,
               isDark: isDark,
-              onTap: () {
-                notifier.scanLocalMusic();
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text('已完成本地无损音乐智能扫描')));
-              },
+              onTap: () => _showScanLocalDialog(context, notifier),
             ),
             _HeaderActionButton(
               icon: Icons.file_download_outlined,
@@ -203,18 +200,76 @@ class HomePage extends ConsumerWidget {
     }
   }
 
+  Future<void> _showScanLocalDialog(
+    BuildContext context,
+    PlayerNotifier notifier,
+  ) async {
+    final controller = TextEditingController();
+    final customPath = await showDialog<String?>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('扫描本地音乐'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('默认扫描系统 Music 与 Downloads 目录，也可指定自定义目录：'),
+            const SizedBox(height: 10),
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                hintText: '可选：输入自定义目录路径',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('取消'),
+          ),
+          OutlinedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(''),
+            child: const Text('扫描默认目录'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('扫描指定目录'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (customPath == null) return;
+
+    final dirs = customPath.isEmpty ? null : <String>[customPath];
+    final count = await notifier.scanLocalMusicReal(directories: dirs);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('本地扫描完成，发现 $count 首音频曲目')));
+  }
+
   Future<void> _showImportDialog(
     BuildContext context,
     PlayerNotifier notifier,
   ) async {
-    final controller = TextEditingController(text: '外部精选歌单');
-    final name = await showDialog<String>(
+    final controller = TextEditingController();
+    final raw = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('导入外部歌单'),
+        title: const Text('导入 M3U / JSON 歌单'),
         content: TextField(
           controller: controller,
-          decoration: const InputDecoration(hintText: '歌单名称或链接'),
+          maxLines: 6,
+          minLines: 4,
+          decoration: const InputDecoration(
+            hintText:
+                '#EXTM3U\n#PLAYLIST:深夜精选\n#EXTINF:240,Artist - Title\n...',
+            border: OutlineInputBorder(),
+          ),
         ),
         actions: [
           TextButton(
@@ -230,9 +285,13 @@ class HomePage extends ConsumerWidget {
       ),
     );
     controller.dispose();
-    if (name != null && name.isNotEmpty) {
-      notifier.importPlaylist(name, const ['trk_01', 'trk_02', 'trk_05']);
-    }
+    if (raw == null || raw.isEmpty) return;
+
+    final ok = await notifier.importPlaylistRaw(raw);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(ok ? '歌单导入成功' : '导入失败：请检查 M3U 或 JSON 格式')),
+    );
   }
 
   void _showTop100Sheet(BuildContext context) {
@@ -652,28 +711,67 @@ class _PlaylistDetailSheet extends ConsumerWidget {
                       ],
                     ),
                   ),
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('已复制歌单「${playlist.name}」分享链接')),
-                      );
-                    },
-                    icon: const Icon(Icons.share_rounded, size: 16),
-                    label: const Text('分享'),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton.icon(
-                    onPressed: playlist.trackIds.isEmpty
-                        ? null
-                        : () {
-                            notifier.replaceQueue(
-                              playlist.name,
-                              playlist.trackIds,
-                            );
-                            Navigator.of(context).pop();
-                          },
-                    icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                    label: const Text('全部播放'),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: playlistTracks.isEmpty
+                            ? null
+                            : () async {
+                                final m3u = PlaylistCodec.toM3u(
+                                  playlist.name,
+                                  playlistTracks,
+                                );
+                                await Clipboard.setData(
+                                  ClipboardData(text: m3u),
+                                );
+                                if (!context.mounted) return;
+                                await showDialog<void>(
+                                  context: context,
+                                  builder: (dialogContext) => AlertDialog(
+                                    title: Text('导出 M3U · ${playlist.name}'),
+                                    content: SingleChildScrollView(
+                                      child: SelectableText(m3u),
+                                    ),
+                                    actions: [
+                                      FilledButton(
+                                        onPressed: () =>
+                                            Navigator.of(dialogContext).pop(),
+                                        child: const Text('已复制并关闭'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                        icon: const Icon(Icons.file_upload_outlined, size: 16),
+                        label: const Text('导出 M3U'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('已复制歌单「${playlist.name}」分享链接'),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.share_rounded, size: 16),
+                        label: const Text('分享'),
+                      ),
+                      FilledButton.icon(
+                        onPressed: playlist.trackIds.isEmpty
+                            ? null
+                            : () {
+                                notifier.replaceQueue(
+                                  playlist.name,
+                                  playlist.trackIds,
+                                );
+                                Navigator.of(context).pop();
+                              },
+                        icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                        label: const Text('全部播放'),
+                      ),
+                    ],
                   ),
                 ],
               ),
