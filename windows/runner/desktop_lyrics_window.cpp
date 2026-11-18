@@ -48,6 +48,14 @@ DesktopLyricsWindow::DesktopLyricsWindow(ActionCallback on_action)
 
 DesktopLyricsWindow::~DesktopLyricsWindow() {
   Destroy();
+  if (custom_family_) {
+    delete static_cast<Gdiplus::FontFamily*>(custom_family_);
+    custom_family_ = nullptr;
+  }
+  if (font_collection_) {
+    delete static_cast<Gdiplus::PrivateFontCollection*>(font_collection_);
+    font_collection_ = nullptr;
+  }
   if (gdiplus_started_) {
     Gdiplus::GdiplusShutdown(gdiplus_token_);
     gdiplus_started_ = false;
@@ -162,27 +170,38 @@ void DesktopLyricsWindow::Render() {
     g.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAliasGridFit);
     g.Clear(Gdiplus::Color(0, 0, 0, 0));
 
-    // Load HarmonyOS Sans SC font if bundled.
-    Gdiplus::PrivateFontCollection private_fonts;
-    const std::wstring font_path = GetFontPath();
-    bool has_custom_font = false;
-    if (GetFileAttributesW(font_path.c_str()) != INVALID_FILE_ATTRIBUTES) {
-      if (private_fonts.AddFontFile(font_path.c_str()) == Gdiplus::Ok &&
-          private_fonts.GetFamilyCount() > 0) {
-        has_custom_font = true;
+    // Load and cache HarmonyOS Sans SC font once so Render() never re-reads
+    // the 20MB TTF from disk on each animation tick.
+    if (!font_loaded_) {
+      font_loaded_ = true;
+      const std::wstring font_path = GetFontPath();
+      if (GetFileAttributesW(font_path.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        auto* collection = new Gdiplus::PrivateFontCollection();
+        if (collection->AddFontFile(font_path.c_str()) == Gdiplus::Ok &&
+            collection->GetFamilyCount() > 0) {
+          auto* fam = new Gdiplus::FontFamily();
+          int found = 0;
+          if (collection->GetFamilies(1, fam, &found) == Gdiplus::Ok &&
+              found > 0) {
+            font_collection_ = collection;
+            custom_family_ = fam;
+            has_custom_font_ = true;
+          } else {
+            delete fam;
+            delete collection;
+          }
+        } else {
+          delete collection;
+        }
       }
-    }
-    Gdiplus::FontFamily custom_family;
-    int found = 0;
-    if (has_custom_font) {
-      private_fonts.GetFamilies(1, &custom_family, &found);
     }
     const Gdiplus::FontFamily fallback_family(L"Microsoft YaHei UI");
     const Gdiplus::FontFamily& family =
-        (has_custom_font && found > 0) ? custom_family : fallback_family;
+        (has_custom_font_ && custom_family_)
+            ? *static_cast<Gdiplus::FontFamily*>(custom_family_)
+            : fallback_family;
 
-    // Draw hover control capsule when hovered (and not locked) or show small
-    // lock button on hover even when locked.
+    // Draw hover control capsule when hovered (and show only lock button when locked).
     if (hovered_) {
       Gdiplus::GraphicsPath bg_path;
       AddRoundedRectPath(
@@ -195,17 +214,13 @@ void DesktopLyricsWindow::Render() {
       g.FillPath(&bg_brush, &bg_path);
       g.DrawPath(&border_pen, &bg_path);
 
-      // Top control buttons: Prev, Play/Pause, Next, Lock, Close
-      const wchar_t* labels[5] = {
-          L"|<", is_playing_ ? L"||" : L"▶", L">|", locked_ ? L"🔓" : L"🔒", L"✕",
-      };
+      // Top control buttons drawn with GDI+ vector geometry (Prev, Play/Pause, Next, Lock, Close).
       const int total_w = 5 * 36 + 4 * 8;
       int start_x = (kWindowWidth - total_w) / 2;
-      Gdiplus::Font btn_font(&family, 11.0f, Gdiplus::FontStyleBold,
-                             Gdiplus::UnitPoint);
-      Gdiplus::StringFormat btn_fmt;
-      btn_fmt.SetAlignment(Gdiplus::StringAlignmentCenter);
-      btn_fmt.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+      Gdiplus::SolidBrush icon_brush(Gdiplus::Color(242, 255, 255, 255));
+      Gdiplus::Pen icon_pen(Gdiplus::Color(242, 255, 255, 255), 1.8f);
+      icon_pen.SetStartCap(Gdiplus::LineCapRound);
+      icon_pen.SetEndCap(Gdiplus::LineCapRound);
 
       for (int i = 0; i < 5; ++i) {
         if (locked_ && i != 3) {
@@ -219,12 +234,71 @@ void DesktopLyricsWindow::Render() {
                           36.0f, 26.0f);
         Gdiplus::GraphicsPath pill;
         AddRoundedRectPath(pill, rf, 10.0f);
+        const bool is_lock_active = (i == 3 && locked_);
         Gdiplus::SolidBrush pill_brush(
-            hover_btn_ == i ? Gdiplus::Color(90, 255, 255, 255)
-                            : Gdiplus::Color(38, 255, 255, 255));
+            hover_btn_ == i
+                ? Gdiplus::Color(96, 255, 255, 255)
+                : (is_lock_active ? Gdiplus::Color(72, 56, 189, 248)
+                                  : Gdiplus::Color(38, 255, 255, 255)));
         g.FillPath(&pill_brush, &pill);
-        Gdiplus::SolidBrush txt_brush(Gdiplus::Color(240, 255, 255, 255));
-        g.DrawString(labels[i], -1, &btn_font, rf, &btn_fmt, &txt_brush);
+
+        const float cx = rf.X + rf.Width * 0.5f;
+        const float cy = rf.Y + rf.Height * 0.5f;
+        switch (i) {
+          case 0: {  // Prev
+            g.FillRectangle(&icon_brush, cx - 5.5f, cy - 5.0f, 2.0f, 10.0f);
+            Gdiplus::PointF pts[3] = {
+                {cx + 5.0f, cy - 5.0f},
+                {cx + 5.0f, cy + 5.0f},
+                {cx - 2.5f, cy},
+            };
+            g.FillPolygon(&icon_brush, pts, 3);
+            break;
+          }
+          case 1: {  // Play / Pause
+            if (is_playing_) {
+              g.FillRectangle(&icon_brush, cx - 4.5f, cy - 5.0f, 3.0f, 10.0f);
+              g.FillRectangle(&icon_brush, cx + 1.5f, cy - 5.0f, 3.0f, 10.0f);
+            } else {
+              Gdiplus::PointF pts[3] = {
+                  {cx - 3.5f, cy - 5.5f},
+                  {cx - 3.5f, cy + 5.5f},
+                  {cx + 5.5f, cy},
+              };
+              g.FillPolygon(&icon_brush, pts, 3);
+            }
+            break;
+          }
+          case 2: {  // Next
+            Gdiplus::PointF pts[3] = {
+                {cx - 5.0f, cy - 5.0f},
+                {cx - 5.0f, cy + 5.0f},
+                {cx + 2.5f, cy},
+            };
+            g.FillPolygon(&icon_brush, pts, 3);
+            g.FillRectangle(&icon_brush, cx + 3.5f, cy - 5.0f, 2.0f, 10.0f);
+            break;
+          }
+          case 3: {  // Lock / Unlock padlock
+            g.FillRectangle(&icon_brush, cx - 5.0f, cy - 0.5f, 10.0f, 7.0f);
+            if (locked_) {
+              g.DrawArc(&icon_pen, cx - 3.2f, cy - 6.0f, 6.4f, 6.4f, 180.0f,
+                        180.0f);
+              g.DrawLine(&icon_pen, cx - 3.2f, cy - 2.8f, cx - 3.2f, cy - 0.2f);
+              g.DrawLine(&icon_pen, cx + 3.2f, cy - 2.8f, cx + 3.2f, cy - 0.2f);
+            } else {
+              g.DrawArc(&icon_pen, cx - 3.2f, cy - 6.8f, 6.4f, 6.4f, 210.0f,
+                        150.0f);
+              g.DrawLine(&icon_pen, cx + 3.2f, cy - 3.6f, cx + 3.2f, cy - 0.2f);
+            }
+            break;
+          }
+          case 4: {  // Close
+            g.DrawLine(&icon_pen, cx - 4.2f, cy - 4.2f, cx + 4.2f, cy + 4.2f);
+            g.DrawLine(&icon_pen, cx + 4.2f, cy - 4.2f, cx - 4.2f, cy + 4.2f);
+            break;
+          }
+        }
         start_x += 44;
       }
     } else {

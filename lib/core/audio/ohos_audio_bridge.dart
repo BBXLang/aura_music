@@ -161,4 +161,17 @@ class OhosAudioBridge {
     'progress': progress.clamp(0.0, 1.0),
     if (isPlaying != null) 'isPlaying': isPlaying,
   });
+
+  /// Initiates a native Windows frameless caption drag on mouse-down.
+  Future<void> startWindowDrag() => _invokeSafe('windowStartDrag');
+
+  /// Minimizes the native desktop window.
+  Future<void> minimizeWindow() => _invokeSafe('windowMinimize');
+
+  /// Toggles between maximized and restored state for the desktop window.
+  Future<void> maximizeOrRestoreWindow() =>
+      _invokeSafe('windowMaximizeOrRestore');
+
+  /// Closes the desktop window.
+  Future<void> closeWindow() => _invokeSafe('windowClose');
 }

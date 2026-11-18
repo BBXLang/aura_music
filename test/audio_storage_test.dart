@@ -3,11 +3,14 @@ import 'package:aura_music/core/audio/ohos_audio_bridge.dart';
 import 'package:aura_music/core/models/playlist.dart';
 import 'package:aura_music/core/models/source_plugin.dart';
 import 'package:aura_music/core/models/track.dart';
+import 'package:aura_music/core/state/player_provider.dart';
 import 'package:aura_music/core/storage/app_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('Model JSON serialization', () {
     test('Track round-trips through toJson and fromJson', () {
       const track = Track(
@@ -158,7 +161,9 @@ void main() {
     test('returns null before any data is saved', () {
       final storage = AppStorage.memory();
 
+      expect(storage.loadTracks(), isNull);
       expect(storage.loadPlaylists(), isNull);
+      expect(storage.loadActiveQueue(), isNull);
       expect(storage.loadPlayHistory(), isNull);
       expect(storage.loadRecentQueues(), isNull);
       expect(storage.loadSources(), isNull);
@@ -167,10 +172,35 @@ void main() {
     });
 
     test(
-      'saves and loads playlists, history, queues, sources, tokens, and settings',
+      'saves and loads tracks, active queue, playlists, history, queues, sources, tokens, and settings',
       () async {
         final storage = AppStorage.memory();
 
+        const tracks = [
+          Track(
+            id: 'hw_999',
+            title: 'Cloud Song',
+            artist: 'Huawei Artist',
+            album: 'Cloud Album',
+            quality: 'Hi-Res',
+            sourceId: 'huawei',
+            durationSeconds: 210,
+            colors: [Color(0xFF1E1B4B), Color(0xFF38BDF8)],
+            lyrics: ['Line A', 'Line B'],
+            lyricLines: [
+              LyricLine(
+                timeSeconds: 5.0,
+                text: 'Line A',
+                words: [
+                  LyricWord(timeSeconds: 5.0, text: 'Line'),
+                  LyricWord(timeSeconds: 6.0, text: ' A'),
+                ],
+              ),
+            ],
+            streamUrl: 'https://transient.signed.example/audio.flac',
+            coverUrl: 'https://cdn.example/cover.jpg',
+          ),
+        ];
         const playlists = [
           Playlist(
             id: 'pl_fav',
@@ -209,12 +239,32 @@ void main() {
           quality: AudioQuality.sqLossless,
         );
 
+        await storage.saveTracks(tracks);
         await storage.savePlaylists(playlists);
+        await storage.saveActiveQueue(
+          queueName: '云端队列',
+          queue: const ['hw_999'],
+          queuePos: 0,
+        );
         await storage.savePlayHistory(history);
         await storage.saveRecentQueues(queues);
         await storage.saveSources(sources);
         await storage.saveOAuthTokens(tokens);
         await storage.saveSettings(settings);
+
+        final loadedTracks = storage.loadTracks();
+        expect(loadedTracks, isNotNull);
+        expect(loadedTracks!.single.id, 'hw_999');
+        expect(loadedTracks.single.coverUrl, 'https://cdn.example/cover.jpg');
+        expect(loadedTracks.single.lyricLines.single.words.length, 2);
+        // Transient Huawei streamUrl is omitted on disk so next play re-resolves.
+        expect(loadedTracks.single.streamUrl, isNull);
+
+        final loadedActiveQueue = storage.loadActiveQueue();
+        expect(loadedActiveQueue, isNotNull);
+        expect(loadedActiveQueue!.queueName, '云端队列');
+        expect(loadedActiveQueue.queue, ['hw_999']);
+        expect(loadedActiveQueue.queuePos, 0);
 
         final loadedPlaylists = storage.loadPlaylists();
         expect(loadedPlaylists, isNotNull);
@@ -247,8 +297,72 @@ void main() {
         expect(loadedSettings.quality, AudioQuality.sqLossless);
 
         await storage.clearAll();
+        expect(storage.loadTracks(), isNull);
         expect(storage.loadPlaylists(), isNull);
+        expect(storage.loadActiveQueue(), isNull);
         expect(storage.loadSettings(), isNull);
+      },
+    );
+
+    test(
+      'PlayerNotifier(emptyStart: true) restores tracks, playlists, and active queue across restarts',
+      () async {
+        final storage = AppStorage.memory();
+
+        final firstSession = PlayerNotifier(storage: storage, emptyStart: true);
+        await firstSession.init();
+
+        const playlistJson = '''
+{
+  "name": "夜间收藏",
+  "tracks": [
+    {
+      "id": "trk_persist_1",
+      "title": "Persistent Song",
+      "artist": "Aura Artist",
+      "album": "Persistent Album",
+      "durationSeconds": 240,
+      "streamUrl": "https://example.com/song1.flac"
+    },
+    {
+      "id": "trk_persist_2",
+      "title": "Second Song",
+      "artist": "Aura Artist",
+      "album": "Persistent Album",
+      "durationSeconds": 195,
+      "streamUrl": "https://example.com/song2.flac"
+    }
+  ]
+}
+''';
+        final importedOk = await firstSession.importPlaylistRaw(playlistJson);
+        expect(importedOk, isTrue);
+        firstSession.replaceQueue('夜间收藏', [
+          'trk_persist_1',
+          'trk_persist_2',
+        ], startPos: 1);
+        await Future<void>.delayed(Duration.zero);
+        firstSession.dispose();
+
+        final secondSession = PlayerNotifier(
+          storage: storage,
+          emptyStart: true,
+        );
+        await secondSession.init();
+
+        expect(
+          secondSession.state.tracks.map((t) => t.id),
+          containsAll(['trk_persist_1', 'trk_persist_2']),
+        );
+        expect(
+          secondSession.state.playlists.any((p) => p.name == '夜间收藏'),
+          isTrue,
+        );
+        expect(secondSession.state.queueName, '夜间收藏');
+        expect(secondSession.state.queue, ['trk_persist_1', 'trk_persist_2']);
+        expect(secondSession.state.queuePos, 1);
+        expect(secondSession.state.currentTrack?.title, 'Second Song');
+        secondSession.dispose();
       },
     );
   });

@@ -301,7 +301,8 @@ void main() {
             LyricLine(timeSeconds: 15.0, text: '不止昨夜的酒'),
           ],
         );
-        expect(timedTrack.lineProgressAt(0, 11.5), closeTo(0.5, 0.01));
+        expect(timedTrack.lineProgressAt(0, 11.5), closeTo(0.375, 0.01));
+        expect(timedTrack.lineProgressAt(0, 12.0), closeTo(0.5, 0.01));
 
         notifier.state = notifier.state.copyWith(
           tracks: [...notifier.state.tracks, timedTrack],
@@ -310,7 +311,7 @@ void main() {
         engine.emitPosition(const Duration(milliseconds: 11500));
         await Future<void>.delayed(Duration.zero);
         expect(notifier.state.activeLyric, 0);
-        expect(notifier.state.lyricLineProgress, closeTo(0.5, 0.01));
+        expect(notifier.state.lyricLineProgress, closeTo(0.375, 0.01));
 
         engine.emitPosition(const Duration(milliseconds: 16000));
         await Future<void>.delayed(Duration.zero);

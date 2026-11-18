@@ -8,6 +8,7 @@ import '../design_system/ambient_background.dart';
 import '../design_system/cover_art.dart';
 import '../design_system/liquid_dock.dart';
 import '../design_system/squircle_border.dart';
+import '../design_system/windows_title_bar.dart';
 import '../features/home/home_page.dart';
 import '../features/player/desktop_lyrics_overlay.dart';
 import '../features/player/immersive_player_page.dart';
@@ -104,11 +105,18 @@ class _AuraAppShellState extends ConsumerState<AuraAppShell> {
         body: Stack(
           children: [
             SafeArea(
-              child: NotificationListener<ScrollNotification>(
-                onNotification: _handleScrollNotification,
-                child: isDesktop
-                    ? _buildDesktopBody(primaryColor, isDark)
-                    : _buildMobileBody(primaryColor, isDark),
+              child: Column(
+                children: [
+                  WindowsTitleBar(primaryColor: primaryColor, isDark: isDark),
+                  Expanded(
+                    child: NotificationListener<ScrollNotification>(
+                      onNotification: _handleScrollNotification,
+                      child: isDesktop
+                          ? _buildDesktopBody(primaryColor, isDark)
+                          : _buildMobileBody(primaryColor, isDark),
+                    ),
+                  ),
+                ],
               ),
             ),
             Positioned(

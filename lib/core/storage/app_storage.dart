@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../audio/ohos_audio_bridge.dart';
 import '../models/playlist.dart';
 import '../models/source_plugin.dart';
+import '../models/track.dart';
 
 /// Persisted user preferences and playback settings for AuraMusic.
 class AppSettings {
@@ -91,7 +92,9 @@ class AppStorage {
     return AppStorage(prefs);
   }
 
+  static const String _keyTracks = 'aura_tracks_v1';
   static const String _keyPlaylists = 'aura_playlists_v1';
+  static const String _keyActiveQueue = 'aura_active_queue_v1';
   static const String _keyPlayHistory = 'aura_play_history_v1';
   static const String _keyRecentQueues = 'aura_recent_queues_v1';
   static const String _keySources = 'aura_sources_v1';
@@ -123,6 +126,35 @@ class AppStorage {
     }
   }
 
+  /// Persists [tracks] metadata to storage.
+  ///
+  /// Transient Huawei Sidecar stream URLs are omitted so fresh playable URLs
+  /// are resolved on the next session.
+  Future<void> saveTracks(List<Track> tracks) {
+    final encoded = jsonEncode(
+      tracks
+          .map((item) {
+            final map = item.toJson();
+            if (item.sourceId == 'huawei' || item.id.startsWith('hw_')) {
+              map.remove('streamUrl');
+            }
+            return map;
+          })
+          .toList(growable: false),
+    );
+    return _writeString(_keyTracks, encoded);
+  }
+
+  /// Loads persisted tracks, or `null` if none have been saved.
+  List<Track>? loadTracks() {
+    final decoded = _decodeJson(_keyTracks);
+    if (decoded is! List) return null;
+    return decoded
+        .whereType<Map>()
+        .map((entry) => Track.fromJson(Map<String, dynamic>.from(entry)))
+        .toList();
+  }
+
   /// Persists [playlists] to storage.
   Future<void> savePlaylists(List<Playlist> playlists) {
     final encoded = jsonEncode(playlists.map((item) => item.toJson()).toList());
@@ -137,6 +169,33 @@ class AppStorage {
         .whereType<Map<String, dynamic>>()
         .map(Playlist.fromJson)
         .toList();
+  }
+
+  /// Persists the active playback queue snapshot to storage.
+  Future<void> saveActiveQueue({
+    required String queueName,
+    required List<String> queue,
+    required int queuePos,
+  }) {
+    return _writeString(
+      _keyActiveQueue,
+      jsonEncode({
+        'queueName': queueName,
+        'queue': queue,
+        'queuePos': queuePos,
+      }),
+    );
+  }
+
+  /// Loads the persisted active playback queue snapshot, or `null` if absent.
+  ({String queueName, List<String> queue, int queuePos})? loadActiveQueue() {
+    final decoded = _decodeJson(_keyActiveQueue);
+    if (decoded is! Map) return null;
+    final queueName = decoded['queueName']?.toString() ?? '当前播放';
+    final rawQueue = decoded['queue'] as List<dynamic>? ?? const [];
+    final queue = rawQueue.map((e) => e.toString()).toList(growable: false);
+    final queuePos = (decoded['queuePos'] as num?)?.toInt() ?? 0;
+    return (queueName: queueName, queue: queue, queuePos: queuePos);
   }
 
   /// Persists [history] entries (`trackId` + `timestampLabel`) to storage.
@@ -218,7 +277,9 @@ class AppStorage {
   /// Clears all AuraMusic keys from storage.
   Future<void> clearAll() async {
     const keys = [
+      _keyTracks,
       _keyPlaylists,
+      _keyActiveQueue,
       _keyPlayHistory,
       _keyRecentQueues,
       _keySources,

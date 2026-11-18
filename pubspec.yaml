@@ -63,7 +63,6 @@ flutter:
     - family: HarmonyOS Sans
       fonts:
         - asset: assets/fonts/HarmonyOS_Sans_SC.ttf
-        - asset: assets/fonts/HarmonyOS_Sans.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

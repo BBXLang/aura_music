@@ -168,6 +168,8 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
   StreamSubscription<Duration>? _durationSub;
   StreamSubscription<void>? _completedSub;
   Duration? _activeDuration;
+  Future<bool>? _sidecarConnecting;
+  bool _hasStartedCurrentSession = false;
   bool _initialized = false;
 
   /// Loads persisted state from [AppStorage] and subscribes to [AudioEngineAdapter] streams.
@@ -175,16 +177,51 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     if (_initialized) return;
     _initialized = true;
 
+    final savedTracks = _storage.loadTracks();
     final savedPlaylists = _storage.loadPlaylists();
+    final savedActiveQueue = _storage.loadActiveQueue();
     final savedHistory = _storage.loadPlayHistory();
     final savedQueues = _storage.loadRecentQueues();
     final savedSources = _storage.loadSources();
     final savedSettings = _storage.loadSettings();
 
+    List<Track>? mergedTracks;
+    if (savedTracks != null) {
+      final byId = <String, Track>{for (final t in state.tracks) t.id: t};
+      for (final t in savedTracks) {
+        byId[t.id] = t;
+      }
+      mergedTracks = List<Track>.unmodifiable(byId.values);
+    }
+
+    final effectiveTracks = mergedTracks ?? state.tracks;
+    final effectiveTrackIds = effectiveTracks.map((t) => t.id).toSet();
+
+    List<String>? restoredQueue;
+    String? restoredQueueName;
+    int? restoredQueuePos;
+    if (savedActiveQueue != null && savedActiveQueue.queue.isNotEmpty) {
+      final validQueue = savedActiveQueue.queue
+          .where(effectiveTrackIds.contains)
+          .toList(growable: false);
+      if (validQueue.isNotEmpty) {
+        restoredQueue = List<String>.unmodifiable(validQueue);
+        restoredQueueName = savedActiveQueue.queueName;
+        restoredQueuePos = savedActiveQueue.queuePos.clamp(
+          0,
+          validQueue.length - 1,
+        );
+      }
+    }
+
     state = state.copyWith(
+      tracks: mergedTracks,
       playlists: savedPlaylists != null
           ? List<Playlist>.unmodifiable(savedPlaylists)
           : null,
+      queueName: restoredQueueName,
+      queue: restoredQueue,
+      queuePos: restoredQueuePos,
       playHistory: savedHistory != null
           ? List<PlayHistoryEntry>.unmodifiable(
               savedHistory.map(
@@ -233,6 +270,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
               )
               .toList(growable: false);
           state = state.copyWith(tracks: List<Track>.unmodifiable(updated));
+          _persistTracks();
         }
       }
     });
@@ -288,7 +326,8 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
         _audioEngine is! NoopAudioEngine &&
         (state.sources.any((s) => s.id == 'huawei') ||
             File(defaultSidecarPath).existsSync())) {
-      unawaited(connectSidecar(defaultSidecarPath));
+      _sidecarConnecting = connectSidecar(defaultSidecarPath);
+      unawaited(_sidecarConnecting!);
     }
   }
 
@@ -458,6 +497,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     );
 
     _syncNativeTrackStart(track);
+    _persistActiveQueue();
     _persistHistory();
   }
 
@@ -468,8 +508,12 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     state = state.copyWith(isPlaying: nextPlaying);
 
     if (nextPlaying) {
-      unawaited(_audioEngine.resume());
       final track = state.currentTrack;
+      if (!_hasStartedCurrentSession && track != null) {
+        _syncNativeTrackStart(track);
+        return;
+      }
+      unawaited(_audioEngine.resume());
       if (track != null) {
         _audioBridge.resume();
         _audioBridge.updatePlaybackState(
@@ -537,6 +581,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     if (track != null) {
       _syncNativeTrackStart(track);
     }
+    _persistActiveQueue();
     _persistHistory();
   }
 
@@ -559,6 +604,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     if (track != null) {
       _syncNativeTrackStart(track);
     }
+    _persistActiveQueue();
     _persistHistory();
   }
 
@@ -667,6 +713,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
         .toList(growable: false);
 
     state = state.copyWith(tracks: updatedTracks);
+    _persistTracks();
   }
 
   /// Cycles [PlayerState.playMode] in order: `loopList -> loopOne -> playOnce`.
@@ -707,6 +754,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       queue: List<String>.unmodifiable(updated),
       queuePos: updatedPos,
     );
+    _persistActiveQueue();
   }
 
   /// Removes the track at [index] from the current queue without replacing it.
@@ -724,6 +772,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       );
       unawaited(_audioEngine.pause());
       _audioBridge.pause();
+      _persistActiveQueue();
       return;
     }
 
@@ -738,6 +787,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       queue: List<String>.unmodifiable(updated),
       queuePos: nextPos,
     );
+    _persistActiveQueue();
   }
 
   /// Replaces the active queue with [trackIds] and pushes the previous queue
@@ -780,6 +830,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       }
       _persistHistory();
     }
+    _persistActiveQueue();
     _persistRecentQueues();
   }
 
@@ -827,6 +878,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       }
       _persistHistory();
     }
+    _persistActiveQueue();
     _persistRecentQueues();
   }
 
@@ -948,7 +1000,9 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       tracks: List<Track>.unmodifiable([...state.tracks, ...discoveredTracks]),
       playlists: List<Playlist>.unmodifiable(updatedPlaylists),
     );
+    _persistTracks();
     _persistPlaylists();
+    _persistActiveQueue();
   }
 
   /// Scans real device [directories] (or [LocalMusicScanner.defaultMusicDirectories])
@@ -988,7 +1042,9 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       tracks: List<Track>.unmodifiable([...state.tracks, ...newTracks]),
       playlists: List<Playlist>.unmodifiable(updatedPlaylists),
     );
+    await _storage.saveTracks(state.tracks);
     await _storage.savePlaylists(state.playlists);
+    _persistActiveQueue();
     return scanned.length;
   }
 
@@ -1027,7 +1083,9 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       tracks: List<Track>.unmodifiable([...state.tracks, ...newTracks]),
       playlists: List<Playlist>.unmodifiable([...state.playlists, imported]),
     );
+    await _storage.saveTracks(state.tracks);
     await _storage.savePlaylists(state.playlists);
+    _persistActiveQueue();
     return true;
   }
 
@@ -1158,6 +1216,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
   }
 
   void _syncNativeTrackStart(Track track) {
+    _hasStartedCurrentSession = true;
     if ((track.sourceId == 'huawei' || track.id.startsWith('hw_')) &&
         (track.streamUrl == null || track.streamUrl!.isEmpty)) {
       unawaited(playSidecarTrack(track));
@@ -1191,8 +1250,22 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     );
   }
 
+  void _persistTracks() {
+    unawaited(_storage.saveTracks(state.tracks));
+  }
+
   void _persistPlaylists() {
     unawaited(_storage.savePlaylists(state.playlists));
+  }
+
+  void _persistActiveQueue() {
+    unawaited(
+      _storage.saveActiveQueue(
+        queueName: state.queueName,
+        queue: state.queue,
+        queuePos: state.queuePos,
+      ),
+    );
   }
 
   void _persistHistory() {
@@ -1320,12 +1393,16 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       state = state.copyWith(
         tracks: List<Track>.unmodifiable([...state.tracks, ...added]),
       );
+      _persistTracks();
     }
     return results;
   }
 
   /// Resolves stream URL & lyrics for a Sidecar track and starts playback.
   Future<void> playSidecarTrack(Track track) async {
+    if (_sidecar == null && _sidecarConnecting != null) {
+      await _sidecarConnecting;
+    }
     final client = _sidecar;
     if (client == null) return;
     final url = await client.resolveStreamUrl(track);
@@ -1346,6 +1423,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       updatedTracks.add(resolved);
     }
     state = state.copyWith(tracks: List<Track>.unmodifiable(updatedTracks));
+    _persistTracks();
     if (resolved.streamUrl != null && resolved.streamUrl!.isNotEmpty) {
       playTrack(resolved.id);
     } else {

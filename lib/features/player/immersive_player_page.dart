@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -11,6 +9,7 @@ import '../../design_system/cover_art.dart';
 import '../../design_system/morph_icon.dart';
 import '../../design_system/particle_effects.dart';
 import '../../design_system/squircle_border.dart';
+import '../../design_system/windows_title_bar.dart';
 import 'queue_sheet.dart';
 
 /// Full-screen immersive player supporting mobile 2-slide Cover/Lyrics
@@ -68,6 +67,11 @@ class _ImmersivePlayerPageState extends ConsumerState<ImmersivePlayerPage> {
         body: SafeArea(
           child: Column(
             children: [
+              WindowsTitleBar(
+                primaryColor: primaryColor,
+                isDark: isDark,
+                title: track?.title ?? 'AuraMusic',
+              ),
               _buildTopBar(context, isDesktop, primaryColor, secondaryColor),
               Expanded(
                 child: track == null
@@ -1117,13 +1121,18 @@ class _AppleMusicLyricsViewState extends State<_AppleMusicLyricsView> {
               Colors.black,
               Colors.transparent,
             ],
-            stops: [0.0, 0.10, 0.88, 1.0],
+            stops: [0.0, 0.04, 0.97, 1.0],
           ).createShader(rect);
         },
         blendMode: BlendMode.dstIn,
         child: SingleChildScrollView(
           controller: _scrollController,
-          padding: const EdgeInsets.symmetric(vertical: 96, horizontal: 6),
+          padding: const EdgeInsets.only(
+            top: 48,
+            bottom: 28,
+            left: 6,
+            right: 6,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1139,7 +1148,6 @@ class _AppleMusicLyricsViewState extends State<_AppleMusicLyricsView> {
   Widget _buildLine(int index) {
     final dist = (index - widget.activeLyric).abs();
     final isActive = dist == 0;
-    final sigma = dist == 0 ? 0.0 : (dist == 1 ? 0.6 : (dist == 2 ? 1.4 : 2.2));
     final opacity = dist == 0
         ? 1.0
         : (dist == 1 ? 0.58 : (dist == 2 ? 0.38 : 0.22));
@@ -1147,21 +1155,30 @@ class _AppleMusicLyricsViewState extends State<_AppleMusicLyricsView> {
 
     Widget textWidget;
     if (isActive) {
-      final p = widget.lineProgress.clamp(0.0, 1.0);
-      final pTail = (p + 0.08).clamp(0.0, 1.0);
-      textWidget = ShaderMask(
-        shaderCallback: (bounds) {
-          return LinearGradient(
-            colors: [
-              widget.primaryColor,
-              widget.primaryColor,
-              widget.primaryColor.withValues(alpha: 0.45),
-              widget.primaryColor.withValues(alpha: 0.45),
-            ],
-            stops: [0.0, p, pTail, 1.0],
-          ).createShader(bounds);
+      final targetProgress = widget.lineProgress.clamp(0.0, 1.0);
+      textWidget = TweenAnimationBuilder<double>(
+        key: ValueKey('active_lyric_${widget.trackId}_$index'),
+        tween: Tween<double>(begin: 0.0, end: targetProgress),
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.linear,
+        builder: (context, p, child) {
+          final pTail = (p + 0.06).clamp(0.0, 1.0);
+          return ShaderMask(
+            shaderCallback: (bounds) {
+              return LinearGradient(
+                colors: [
+                  widget.primaryColor,
+                  widget.primaryColor,
+                  widget.primaryColor.withValues(alpha: 0.42),
+                  widget.primaryColor.withValues(alpha: 0.42),
+                ],
+                stops: [0.0, p, pTail, 1.0],
+              ).createShader(bounds);
+            },
+            blendMode: BlendMode.srcIn,
+            child: child,
+          );
         },
-        blendMode: BlendMode.srcIn,
         child: Text(
           widget.lyrics[index],
           style: TextStyle(
@@ -1192,31 +1209,26 @@ class _AppleMusicLyricsViewState extends State<_AppleMusicLyricsView> {
       );
     }
 
-    if (sigma > 0) {
-      textWidget = ImageFiltered(
-        imageFilter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-        child: textWidget,
-      );
-    }
-
-    return Padding(
-      key: _lineKeys[index],
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () {
-          _lastUserInteraction = null;
-          widget.onJumpLyric(index);
-        },
-        child: AnimatedScale(
-          scale: scale,
-          alignment: Alignment.centerLeft,
-          duration: const Duration(milliseconds: 380),
-          curve: Curves.easeOutCubic,
-          child: AnimatedOpacity(
-            opacity: opacity,
-            duration: const Duration(milliseconds: 320),
-            child: textWidget,
+    return RepaintBoundary(
+      child: Padding(
+        key: _lineKeys[index],
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            _lastUserInteraction = null;
+            widget.onJumpLyric(index);
+          },
+          child: AnimatedScale(
+            scale: scale,
+            alignment: Alignment.centerLeft,
+            duration: const Duration(milliseconds: 340),
+            curve: Curves.easeOutCubic,
+            child: AnimatedOpacity(
+              opacity: opacity,
+              duration: const Duration(milliseconds: 280),
+              child: textWidget,
+            ),
           ),
         ),
       ),

@@ -125,6 +125,28 @@ bool FlutterWindow::OnCreate() {
           result->Success();
           return;
         }
+        if (call.method_name() == "windowStartDrag") {
+          ReleaseCapture();
+          SendMessageW(GetHandle(), WM_NCLBUTTONDOWN, HTCAPTION, 0);
+          result->Success();
+          return;
+        }
+        if (call.method_name() == "windowMinimize") {
+          ShowWindow(GetHandle(), SW_MINIMIZE);
+          result->Success();
+          return;
+        }
+        if (call.method_name() == "windowMaximizeOrRestore") {
+          HWND h = GetHandle();
+          ShowWindow(h, IsZoomed(h) ? SW_RESTORE : SW_MAXIMIZE);
+          result->Success();
+          return;
+        }
+        if (call.method_name() == "windowClose") {
+          PostMessageW(GetHandle(), WM_CLOSE, 0, 0);
+          result->Success();
+          return;
+        }
         result->Success();
       });
 

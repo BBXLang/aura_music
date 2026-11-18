@@ -2,6 +2,7 @@
 
 #include <dwmapi.h>
 #include <flutter_windows.h>
+#include <windowsx.h>
 
 #include "resource.h"
 
@@ -146,6 +147,11 @@ bool Win32Window::Create(const std::wstring& title,
 
   UpdateTheme(window);
 
+  MARGINS margins = {0, 0, 1, 0};
+  DwmExtendFrameIntoClientArea(window, &margins);
+  SetWindowPos(window, nullptr, 0, 0, 0, 0,
+               SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+
   return OnCreate();
 }
 
@@ -212,6 +218,45 @@ Win32Window::MessageHandler(HWND hwnd,
         SetFocus(child_content_);
       }
       return 0;
+
+    case WM_NCCALCSIZE: {
+      if (wparam == TRUE) {
+        auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam);
+        if (IsZoomed(hwnd)) {
+          HMONITOR mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+          MONITORINFO mi{};
+          mi.cbSize = sizeof(MONITORINFO);
+          if (GetMonitorInfoW(mon, &mi)) {
+            params->rgrc[0] = mi.rcWork;
+          }
+        }
+        return 0;
+      }
+      break;
+    }
+
+    case WM_NCHITTEST: {
+      if (!IsZoomed(hwnd)) {
+        RECT rc{};
+        GetWindowRect(hwnd, &rc);
+        const int x = GET_X_LPARAM(lparam);
+        const int y = GET_Y_LPARAM(lparam);
+        constexpr int kBorder = 6;
+        const bool left = x >= rc.left && x < rc.left + kBorder;
+        const bool right = x < rc.right && x >= rc.right - kBorder;
+        const bool top = y >= rc.top && y < rc.top + kBorder;
+        const bool bottom = y < rc.bottom && y >= rc.bottom - kBorder;
+        if (top && left) return HTTOPLEFT;
+        if (top && right) return HTTOPRIGHT;
+        if (bottom && left) return HTBOTTOMLEFT;
+        if (bottom && right) return HTBOTTOMRIGHT;
+        if (left) return HTLEFT;
+        if (right) return HTRIGHT;
+        if (top) return HTTOP;
+        if (bottom) return HTBOTTOM;
+      }
+      break;
+    }
 
     case WM_DWMCOLORIZATIONCOLORCHANGED:
       UpdateTheme(hwnd);

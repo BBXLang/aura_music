@@ -113,8 +113,12 @@ class Track {
           .toList(growable: false),
       liked: json['liked'] as bool? ?? false,
       localPath: json['localPath'] as String?,
-      streamUrl: json['streamUrl'] as String?,
-      coverUrl: json['coverUrl'] as String?,
+      streamUrl: (json['streamUrl'] as String?)?.isNotEmpty == true
+          ? json['streamUrl'] as String
+          : null,
+      coverUrl: (json['coverUrl'] as String?)?.isNotEmpty == true
+          ? json['coverUrl'] as String
+          : null,
     );
   }
 
@@ -150,11 +154,30 @@ class Track {
         ? lyricLines[lineIndex + 1].timeSeconds
         : durationSeconds.toDouble();
     if (line.words.isNotEmpty) {
-      int activeWords = 0;
-      for (final w in line.words) {
-        if (currentSeconds >= w.timeSeconds) activeWords++;
+      if (currentSeconds <= line.words.first.timeSeconds) {
+        return 0.0;
       }
-      return (activeWords / line.words.length).clamp(0.0, 1.0);
+      if (nextTime > line.words.first.timeSeconds &&
+          currentSeconds >= nextTime) {
+        return 1.0;
+      }
+      int activeIndex = 0;
+      for (var i = 0; i < line.words.length; i++) {
+        if (currentSeconds >= line.words[i].timeSeconds) {
+          activeIndex = i;
+        } else {
+          break;
+        }
+      }
+      final wordStart = line.words[activeIndex].timeSeconds;
+      final wordEnd = (activeIndex + 1 < line.words.length)
+          ? line.words[activeIndex + 1].timeSeconds
+          : nextTime;
+      final wordSpan = wordEnd - wordStart;
+      final intra = wordSpan > 0.01
+          ? ((currentSeconds - wordStart) / wordSpan).clamp(0.0, 1.0)
+          : 1.0;
+      return ((activeIndex + intra) / line.words.length).clamp(0.0, 1.0);
     }
     final span = nextTime - line.timeSeconds;
     if (span <= 0.05) return 1.0;

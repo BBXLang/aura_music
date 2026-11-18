@@ -41,13 +41,17 @@ class DesktopLyricsWindow {
   HWND hwnd_ = nullptr;
   ULONG_PTR gdiplus_token_ = 0;
   bool gdiplus_started_ = false;
+  bool font_loaded_ = false;
+  bool has_custom_font_ = false;
+  void* font_collection_ = nullptr;
+  void* custom_family_ = nullptr;
   bool visible_ = false;
   bool hovered_ = false;
   bool locked_ = false;
   bool tracking_leave_ = false;
   bool is_playing_ = false;
   double progress_ = 0.0;
-  std::wstring current_line_ = L"AuraMusic 桌面歌词";
+  std::wstring current_line_ = L"AuraMusic \u684C\u9762\u6B4C\u8BCD";
   std::wstring next_line_;
   RECT btn_rects_[5]{};
   int hover_btn_ = -1;
