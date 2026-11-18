@@ -75,6 +75,9 @@ class _SidecarWebViewDialogState extends State<_SidecarWebViewDialog> {
     }
     try {
       await _controller.initialize();
+      await _controller.setUserAgent(
+        'Mozilla/5.0 (Linux; Android 12; HarmonyOS; hwid_clienttype=hmos) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+      );
       await _controller.setPopupWindowPolicy(
         WebviewPopupWindowPolicy.sameWindow,
       );
@@ -131,7 +134,7 @@ class _SidecarWebViewDialogState extends State<_SidecarWebViewDialog> {
   }
 
   Future<void> _openExternalFallback() async {
-    await Process.run('cmd', ['/c', 'start', '', widget.url]);
+    await Process.run('rundll32', ['url.dll,FileProtocolHandler', widget.url]);
     if (!mounted) return;
     final controller = TextEditingController();
     final pasted = await showDialog<String>(
@@ -163,13 +166,17 @@ class _SidecarWebViewDialogState extends State<_SidecarWebViewDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final screenSize = MediaQuery.sizeOf(context);
+    final dialogWidth = (screenSize.width * 0.9).clamp(360.0, 860.0);
+    final dialogHeight = (screenSize.height * 0.9).clamp(420.0, 760.0);
+
     return Dialog(
-      insetPadding: const EdgeInsets.all(24),
+      insetPadding: const EdgeInsets.all(12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       clipBehavior: Clip.antiAlias,
       child: SizedBox(
-        width: 540,
-        height: 660,
+        width: dialogWidth,
+        height: dialogHeight,
         child: Column(
           children: [
             Padding(
