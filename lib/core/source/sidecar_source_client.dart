@@ -97,6 +97,16 @@ class JsonRpcFramer {
   }
 }
 
+/// Callback invoked when the Sidecar requests `host.webview.open` for OAuth.
+/// Should return the final redirected callback URL (e.g. `hms://redirect_uri?code=...`),
+/// or `null` if cancelled.
+typedef WebViewOpenCallback =
+    Future<String?> Function(
+      String url,
+      String callbackScheme,
+      String callbackHost,
+    );
+
 /// Manages a Sidecar native source binary (e.g. `huawei-source.exe` on Windows)
 /// using bidirectional `Content-Length` JSON-RPC 2.0 over stdin/stdout.
 class SidecarSourceClient {
@@ -104,11 +114,13 @@ class SidecarSourceClient {
     required this.sourceId,
     required this.storage,
     this.executablePath,
+    this.onWebViewOpen,
   });
 
   final String sourceId;
   final AppStorage storage;
   String? executablePath;
+  WebViewOpenCallback? onWebViewOpen;
 
   Process? _process;
   StreamSubscription<List<int>>? _stdoutSub;
@@ -176,7 +188,23 @@ class SidecarSourceClient {
       await storage.saveOAuthTokens(tokens);
       result = {'ok': true};
     } else if (method == 'host.webview.open') {
-      result = {'ok': true};
+      final url = (params is Map ? params['url']?.toString() : null) ?? '';
+      final cb = (params is Map && params['callback'] is Map)
+          ? params['callback'] as Map
+          : const {};
+      final scheme = cb['scheme']?.toString() ?? 'hms';
+      final host = cb['host']?.toString() ?? 'redirect_uri';
+      final callbackUrl = await onWebViewOpen?.call(url, scheme, host);
+      if (callbackUrl != null && callbackUrl.isNotEmpty) {
+        result = {'callbackUrl': callbackUrl};
+      } else {
+        _sendRaw({
+          'jsonrpc': '2.0',
+          'id': id,
+          'error': {'code': -32001, 'message': 'login cancelled'},
+        });
+        return;
+      }
     } else {
       result = null;
     }
@@ -213,10 +241,12 @@ class SidecarSourceClient {
     );
   }
 
-  /// Triggers the Sidecar's native login flow (e.g. WebView2 OAuth window).
+  /// Triggers the Sidecar's native WebView OAuth login flow.
   Future<bool> login() async {
     try {
-      await call('source.auth.login', {}, const Duration(minutes: 3));
+      await call('source.auth.login', {
+        'kind': 'webview',
+      }, const Duration(minutes: 5));
       return true;
     } catch (_) {
       return false;

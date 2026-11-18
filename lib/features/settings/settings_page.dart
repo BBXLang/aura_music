@@ -5,6 +5,7 @@ import '../../core/models/source_plugin.dart';
 import '../../core/source/js_plugin_bridge.dart';
 import '../../core/state/player_provider.dart';
 import '../../design_system/squircle_border.dart';
+import 'sidecar_webview_dialog.dart';
 
 /// Settings page for music source OAuth plugins and display/playback toggles.
 class SettingsPage extends ConsumerWidget {
@@ -51,67 +52,87 @@ class SettingsPage extends ConsumerWidget {
         SquircleCard(
           radius: 22,
           padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Column(
-            children: [
-              for (var i = 0; i < state.sources.length; i++) ...[
-                if (i > 0)
-                  Divider(
-                    height: 1,
-                    indent: 16,
-                    endIndent: 16,
-                    color: primaryColor.withValues(alpha: 0.08),
+          child: state.sources.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Text(
+                    '暂未接入音源，请点击上方 Sidecar 或 + JS 插件',
+                    style: TextStyle(fontSize: 13, color: secondaryColor),
                   ),
-                ListTile(
-                  title: Text(
-                    state.sources[i].name,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: primaryColor,
-                    ),
-                  ),
-                  subtitle: Text(
-                    'v${state.sources[i].version} · ${state.sources[i].tierLabel}',
-                    style: TextStyle(fontSize: 12, color: secondaryColor),
-                  ),
-                  trailing: FilledButton.tonal(
-                    onPressed: () async {
-                      final source = state.sources[i];
-                      if (source.id == 'huawei' && !source.connected) {
-                        final ok = await notifier.loginSidecar();
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                ok ? 'Sidecar OAuth 登录成功' : 'Sidecar 登录未完成',
-                              ),
-                            ),
-                          );
-                        }
-                        return;
-                      }
-                      if (source.connected) {
-                        notifier.toggleOAuth(source.id);
-                      } else {
-                        _showOAuthPkceSheet(context, notifier, source);
-                      }
-                    },
-                    style: FilledButton.styleFrom(
-                      backgroundColor: state.sources[i].connected
-                          ? const Color(0xFF10B981).withValues(alpha: 0.18)
-                          : primaryColor.withValues(alpha: 0.1),
-                      foregroundColor: state.sources[i].connected
-                          ? const Color(0xFF10B981)
-                          : primaryColor,
-                    ),
-                    child: Text(
-                      state.sources[i].connected ? '已授权' : 'OAuth 登录',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  ),
+                )
+              : Column(
+                  children: [
+                    for (var i = 0; i < state.sources.length; i++) ...[
+                      if (i > 0)
+                        Divider(
+                          height: 1,
+                          indent: 16,
+                          endIndent: 16,
+                          color: primaryColor.withValues(alpha: 0.08),
+                        ),
+                      ListTile(
+                        title: Text(
+                          state.sources[i].name,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: primaryColor,
+                          ),
+                        ),
+                        subtitle: Text(
+                          'v${state.sources[i].version} · ${state.sources[i].tierLabel}',
+                          style: TextStyle(fontSize: 12, color: secondaryColor),
+                        ),
+                        trailing: FilledButton.tonal(
+                          onPressed: () async {
+                            final source = state.sources[i];
+                            if (source.id == 'huawei' && !source.connected) {
+                              final ok = await notifier.loginSidecar(
+                                onWebViewOpen: (url, scheme, host) =>
+                                    showSidecarWebViewLoginDialog(
+                                      context,
+                                      url: url,
+                                      callbackScheme: scheme,
+                                      callbackHost: host,
+                                    ),
+                              );
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      ok
+                                          ? 'Sidecar OAuth 登录成功'
+                                          : 'Sidecar 登录未完成',
+                                    ),
+                                  ),
+                                );
+                              }
+                              return;
+                            }
+                            if (source.connected) {
+                              notifier.toggleOAuth(source.id);
+                            } else {
+                              _showOAuthPkceSheet(context, notifier, source);
+                            }
+                          },
+                          style: FilledButton.styleFrom(
+                            backgroundColor: state.sources[i].connected
+                                ? const Color(
+                                    0xFF10B981,
+                                  ).withValues(alpha: 0.18)
+                                : primaryColor.withValues(alpha: 0.1),
+                            foregroundColor: state.sources[i].connected
+                                ? const Color(0xFF10B981)
+                                : primaryColor,
+                          ),
+                          child: Text(
+                            state.sources[i].connected ? '已授权' : 'OAuth 登录',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
-              ],
-            ],
-          ),
         ),
         const SizedBox(height: 26),
         Text(
@@ -357,7 +378,16 @@ class SettingsPage extends ConsumerWidget {
           ),
           FilledButton(
             onPressed: () async {
-              final ok = await notifier.connectSidecar(controller.text.trim());
+              final ok = await notifier.connectSidecar(
+                controller.text.trim(),
+                onWebViewOpen: (url, scheme, host) =>
+                    showSidecarWebViewLoginDialog(
+                      context,
+                      url: url,
+                      callbackScheme: scheme,
+                      callbackHost: host,
+                    ),
+              );
               if (!dialogContext.mounted) return;
               Navigator.of(dialogContext).pop();
               if (!context.mounted) return;

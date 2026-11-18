@@ -145,10 +145,11 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     OhosAudioBridge? audioBridge,
     AudioEngineAdapter? audioEngine,
     AppStorage? storage,
+    bool emptyStart = false,
   }) : _audioBridge = audioBridge ?? const OhosAudioBridge(),
        _audioEngine = audioEngine ?? NoopAudioEngine(),
        _storage = storage ?? AppStorage.memory(),
-       super(_createInitialState());
+       super(emptyStart ? _createEmptyState() : _createInitialState());
 
   static const int _maxRecentQueues = 3;
   static const int _maxPlayHistory = 50;
@@ -253,6 +254,29 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     _completedSub?.cancel();
     unawaited(_sidecar?.dispose());
     super.dispose();
+  }
+
+  static PlayerState _createEmptyState() {
+    return const PlayerState(
+      tracks: [],
+      playlists: [
+        Playlist(
+          id: 'pl_local',
+          name: '本地音乐',
+          type: PlaylistType.local,
+          trackIds: [],
+        ),
+      ],
+      sources: [],
+      queueName: '当前播放',
+      queue: [],
+      queuePos: 0,
+      recentQueues: [],
+      playHistory: [],
+      isPlaying: false,
+      progress: 0.0,
+      activeLyric: 0,
+    );
   }
 
   static PlayerState _createInitialState() {
@@ -1072,12 +1096,16 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
 
   /// Connects a Windows/Desktop Sidecar binary (e.g. `huawei-source.exe`)
   /// using `Content-Length` JSON-RPC 2.0.
-  Future<bool> connectSidecar(String executablePath) async {
+  Future<bool> connectSidecar(
+    String executablePath, {
+    WebViewOpenCallback? onWebViewOpen,
+  }) async {
     await _sidecar?.dispose();
     final client = SidecarSourceClient(
       sourceId: 'huawei',
       storage: _storage,
       executablePath: executablePath,
+      onWebViewOpen: onWebViewOpen,
     );
     final started = await client.start();
     if (!started) return false;
@@ -1097,9 +1125,12 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
   }
 
   /// Triggers the Sidecar native WebView OAuth login flow.
-  Future<bool> loginSidecar() async {
+  Future<bool> loginSidecar({WebViewOpenCallback? onWebViewOpen}) async {
     final client = _sidecar;
     if (client == null) return false;
+    if (onWebViewOpen != null) {
+      client.onWebViewOpen = onWebViewOpen;
+    }
     final ok = await client.login();
     if (!ok) return false;
     final updated = state.sources
@@ -1160,6 +1191,9 @@ final audioEngineProvider = Provider<AudioEngineAdapter>(
 /// Riverpod provider for the active [AppStorage].
 final appStorageProvider = Provider<AppStorage>((ref) => AppStorage.memory());
 
+/// Whether [PlayerNotifier] starts with an empty production state (no fake data).
+final emptyStartProvider = Provider<bool>((ref) => false);
+
 /// Global Riverpod provider for [PlayerNotifier] and [PlayerState].
 final playerProvider = StateNotifierProvider<PlayerNotifier, PlayerState>((
   ref,
@@ -1167,5 +1201,6 @@ final playerProvider = StateNotifierProvider<PlayerNotifier, PlayerState>((
   return PlayerNotifier(
     audioEngine: ref.watch(audioEngineProvider),
     storage: ref.watch(appStorageProvider),
+    emptyStart: ref.watch(emptyStartProvider),
   );
 });

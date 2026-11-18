@@ -20,6 +20,7 @@ Future<void> main() async {
       overrides: [
         appStorageProvider.overrideWithValue(storage),
         audioEngineProvider.overrideWithValue(engine),
+        emptyStartProvider.overrideWithValue(true),
       ],
       child: const AuraMusicApp(),
     ),

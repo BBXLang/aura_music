@@ -32,23 +32,34 @@ class HomePage extends ConsumerWidget {
         _buildHotHeader(context, primaryColor, isDark),
         const SizedBox(height: 14),
         SizedBox(
-          height: 192,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: topTracks.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 14),
-            itemBuilder: (context, index) {
-              final track = topTracks[index];
-              final isCurrent = state.currentTrackId == track.id;
-              return _HotTrackCard(
-                track: track,
-                isCurrent: isCurrent,
-                primaryColor: primaryColor,
-                secondaryColor: secondaryColor,
-                onTap: () => notifier.playTrack(track.id),
-              );
-            },
-          ),
+          height: topTracks.isEmpty ? 88 : 192,
+          child: topTracks.isEmpty
+              ? SquircleCard(
+                  radius: 20,
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  child: Center(
+                    child: Text(
+                      '暂无曲目 · 点击下方「扫描本地」或在设置接入 Sidecar / JS 音源',
+                      style: TextStyle(fontSize: 13, color: secondaryColor),
+                    ),
+                  ),
+                )
+              : ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: topTracks.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 14),
+                  itemBuilder: (context, index) {
+                    final track = topTracks[index];
+                    final isCurrent = state.currentTrackId == track.id;
+                    return _HotTrackCard(
+                      track: track,
+                      isCurrent: isCurrent,
+                      primaryColor: primaryColor,
+                      secondaryColor: secondaryColor,
+                      onTap: () => notifier.playTrack(track.id),
+                    );
+                  },
+                ),
         ),
         const SizedBox(height: 28),
         _buildPlaylistHeader(context, notifier, primaryColor, isDark),
