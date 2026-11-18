@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -224,6 +225,15 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     _completedSub = _audioEngine.onCompleted.listen((_) {
       nextTrack(auto: true);
     });
+
+    const defaultSidecarPath =
+        r'D:\code\Music\docs\huawei-1.0.0-windows-x64\bin\huawei-source.exe';
+    if (Platform.isWindows &&
+        _audioEngine is! NoopAudioEngine &&
+        (state.sources.any((s) => s.id == 'huawei') ||
+            File(defaultSidecarPath).existsSync())) {
+      unawaited(connectSidecar(defaultSidecarPath));
+    }
   }
 
   void _handlePositionUpdate(Duration position) {
@@ -1019,6 +1029,11 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
   }
 
   void _syncNativeTrackStart(Track track) {
+    if ((track.sourceId == 'huawei' || track.id.startsWith('hw_')) &&
+        (track.streamUrl == null || track.streamUrl!.isEmpty)) {
+      unawaited(playSidecarTrack(track));
+      return;
+    }
     _activeDuration = null;
     if (track.localPath != null && track.localPath!.isNotEmpty) {
       unawaited(_audioEngine.playFile(track.localPath!));
@@ -1109,8 +1124,13 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     );
     final started = await client.start();
     if (!started) return false;
+    if (!mounted) {
+      await client.dispose();
+      return false;
+    }
     _sidecar = client;
     final verified = await client.verifySession();
+    if (!mounted) return false;
     final plugin = SourcePlugin(
       id: 'huawei',
       name: '华为音乐 (Sidecar)',
@@ -1132,7 +1152,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       client.onWebViewOpen = onWebViewOpen;
     }
     final ok = await client.login();
-    if (!ok) return false;
+    if (!ok || !mounted) return false;
     final updated = state.sources
         .map(
           (s) => s.id == 'huawei'
@@ -1150,7 +1170,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     final client = _sidecar;
     if (client == null || query.trim().isEmpty) return const [];
     final results = await client.search(query.trim());
-    if (results.isEmpty) return const [];
+    if (results.isEmpty || !mounted) return results;
     final existing = state.tracks.map((t) => t.id).toSet();
     final added = results.where((t) => !existing.contains(t.id)).toList();
     if (added.isNotEmpty) {
@@ -1165,8 +1185,9 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
   Future<void> playSidecarTrack(Track track) async {
     final client = _sidecar;
     if (client == null) return;
-    final url = await client.resolveStreamUrl(track.id);
+    final url = await client.resolveStreamUrl(track);
     final lyrics = await client.fetchLyrics(track.id);
+    if (!mounted) return;
     final resolved = track.copyWith(
       streamUrl: url ?? track.streamUrl,
       lyrics: lyrics.isNotEmpty ? lyrics : track.lyrics,
@@ -1179,7 +1200,11 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       updatedTracks.add(resolved);
     }
     state = state.copyWith(tracks: List<Track>.unmodifiable(updatedTracks));
-    playTrack(resolved.id);
+    if (resolved.streamUrl != null && resolved.streamUrl!.isNotEmpty) {
+      playTrack(resolved.id);
+    } else {
+      state = state.copyWith(isPlaying: false);
+    }
   }
 }
 

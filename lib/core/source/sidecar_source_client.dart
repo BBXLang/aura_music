@@ -127,6 +127,7 @@ class SidecarSourceClient {
   final JsonRpcFramer _framer = JsonRpcFramer();
   final Map<String, Completer<dynamic>> _pending = {};
   int _nextId = 1;
+  bool _sessionLoaded = false;
 
   bool get isRunning => _process != null;
 
@@ -247,6 +248,7 @@ class SidecarSourceClient {
       await call('source.auth.login', {
         'kind': 'webview',
       }, const Duration(minutes: 5));
+      _sessionLoaded = true;
       return true;
     } catch (_) {
       return false;
@@ -256,8 +258,14 @@ class SidecarSourceClient {
   /// Verifies whether the stored session is still valid.
   Future<bool> verifySession() async {
     try {
-      final res = await call('source.auth.verify');
-      return res is Map && (res['authenticated'] == true || res['ok'] == true);
+      final res = await call('source.auth.status');
+      final signedIn =
+          res is Map &&
+          (res['state'] == 'signedIn' ||
+              res['authenticated'] == true ||
+              res['ok'] == true);
+      _sessionLoaded = signedIn;
+      return signedIn;
     } catch (_) {
       return false;
     }
@@ -297,15 +305,28 @@ class SidecarSourceClient {
         durationSeconds: (item['durationSeconds'] as num?)?.toInt() ?? 240,
         colors: const [Color(0xFFC7000B), Color(0xFF6B4EFF), Color(0xFF00C2FF)],
         lyrics: const ['正在加载歌词...'],
+        coverUrl: item['coverUrl']?.toString(),
       );
     }).toList();
   }
 
   /// Resolves a playable audio stream URL via `source.library.resolve`.
-  Future<String?> resolveStreamUrl(String trackId) async {
-    final rawId = trackId.startsWith('hw_') ? trackId.substring(3) : trackId;
+  Future<String?> resolveStreamUrl(Track track) async {
+    if (!_sessionLoaded) {
+      await verifySession();
+    }
+    final rawId = track.id.startsWith('hw_') ? track.id.substring(3) : track.id;
     try {
-      final res = await call('source.library.resolve', {'id': rawId});
+      final res = await call('source.library.resolve', {
+        'track': {
+          'source': 'huawei',
+          'id': rawId,
+          'title': track.title,
+          'artists': [
+            {'name': track.artist},
+          ],
+        },
+      });
       if (res is Map) {
         return res['url']?.toString() ?? res['streamUrl']?.toString();
       }
@@ -317,9 +338,19 @@ class SidecarSourceClient {
 
   /// Fetches lyrics via `source.lyrics.get`.
   Future<List<String>> fetchLyrics(String trackId) async {
+    if (!_sessionLoaded) {
+      await verifySession();
+    }
     final rawId = trackId.startsWith('hw_') ? trackId.substring(3) : trackId;
     try {
       final res = await call('source.lyrics.get', {'id': rawId});
+      if (res is List) {
+        return res
+            .whereType<Map>()
+            .map((item) => item['text']?.toString().trim() ?? '')
+            .where((line) => line.isNotEmpty)
+            .toList();
+      }
       if (res is Map && res['lines'] is List) {
         return (res['lines'] as List).map((e) => e.toString()).toList();
       }

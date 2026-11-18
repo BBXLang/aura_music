@@ -124,6 +124,7 @@ class _AuraAppShellState extends ConsumerState<AuraAppShell> {
                         colors: colors,
                         size: 46,
                         radius: 14,
+                        imageUrl: track?.coverUrl,
                       ),
                       title: track?.title ?? 'AuraMusic',
                       artist: track?.artist ?? '点击探索音乐',

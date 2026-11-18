@@ -16,6 +16,7 @@ class Track {
     this.liked = false,
     this.localPath,
     this.streamUrl,
+    this.coverUrl,
   });
 
   final String id;
@@ -30,6 +31,7 @@ class Track {
   final bool liked;
   final String? localPath;
   final String? streamUrl;
+  final String? coverUrl;
 
   /// Creates a [Track] from a JSON map.
   factory Track.fromJson(Map<String, dynamic> json) {
@@ -51,6 +53,7 @@ class Track {
       liked: json['liked'] as bool? ?? false,
       localPath: json['localPath'] as String?,
       streamUrl: json['streamUrl'] as String?,
+      coverUrl: json['coverUrl'] as String?,
     );
   }
 
@@ -69,6 +72,7 @@ class Track {
       'liked': liked,
       if (localPath != null) 'localPath': localPath,
       if (streamUrl != null) 'streamUrl': streamUrl,
+      if (coverUrl != null) 'coverUrl': coverUrl,
     };
   }
 
@@ -94,6 +98,7 @@ class Track {
     bool? liked,
     String? localPath,
     String? streamUrl,
+    String? coverUrl,
   }) {
     return Track(
       id: id ?? this.id,
@@ -108,6 +113,7 @@ class Track {
       liked: liked ?? this.liked,
       localPath: localPath ?? this.localPath,
       streamUrl: streamUrl ?? this.streamUrl,
+      coverUrl: coverUrl ?? this.coverUrl,
     );
   }
 }

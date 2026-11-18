@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -16,10 +18,12 @@ class SearchPage extends ConsumerStatefulWidget {
 
 class _SearchPageState extends ConsumerState<SearchPage> {
   final TextEditingController _controller = TextEditingController();
+  Timer? _debounce;
   String _query = '';
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -52,8 +56,20 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
             child: TextField(
               controller: _controller,
-              onChanged: (value) => setState(() => _query = value),
-              onSubmitted: (value) => notifier.searchSidecar(value),
+              onChanged: (value) {
+                setState(() => _query = value);
+                _debounce?.cancel();
+                if (value.trim().isNotEmpty) {
+                  _debounce = Timer(
+                    const Duration(milliseconds: 400),
+                    () => notifier.searchSidecar(value),
+                  );
+                }
+              },
+              onSubmitted: (value) {
+                _debounce?.cancel();
+                notifier.searchSidecar(value);
+              },
               style: TextStyle(color: primaryColor, fontSize: 15),
               decoration: InputDecoration(
                 border: InputBorder.none,
@@ -111,6 +127,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                                 colors: track.colors,
                                 size: 48,
                                 radius: 13,
+                                imageUrl: track.coverUrl,
                               ),
                               const SizedBox(width: 12),
                               Expanded(

@@ -214,6 +214,7 @@ class _ImmersivePlayerPageState extends ConsumerState<ImmersivePlayerPage> {
                           colors: track.colors,
                           size: coverSize,
                           radius: 28,
+                          imageUrl: track.coverUrl,
                         ),
                       ),
                       Positioned(
@@ -330,7 +331,12 @@ class _ImmersivePlayerPageState extends ConsumerState<ImmersivePlayerPage> {
         children: [
           Row(
             children: [
-              ProceduralCoverArt(colors: track.colors, size: 46, radius: 12),
+              ProceduralCoverArt(
+                colors: track.colors,
+                size: 46,
+                radius: 12,
+                imageUrl: track.coverUrl,
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -450,6 +456,7 @@ class _ImmersivePlayerPageState extends ConsumerState<ImmersivePlayerPage> {
                         colors: track.colors,
                         size: 236,
                         radius: 30,
+                        imageUrl: track.coverUrl,
                       ),
                     ),
                   ),

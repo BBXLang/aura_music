@@ -357,6 +357,7 @@ class _HotTrackCard extends StatelessWidget {
                     colors: track.colors,
                     size: 116,
                     radius: 16,
+                    imageUrl: track.coverUrl,
                   ),
                   Positioned(
                     right: 6,
@@ -425,7 +426,8 @@ class _PlaylistCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final coverColors = _resolveCoverColors();
+    final firstTrack = _resolveFirstTrack();
+    final coverColors = firstTrack?.colors ?? _defaultCoverColors;
     final typeLabel = switch (playlist.type) {
       PlaylistType.local => '本地无损',
       PlaylistType.user => '自建歌单',
@@ -442,7 +444,12 @@ class _PlaylistCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                ProceduralCoverArt(colors: coverColors, size: 52, radius: 14),
+                ProceduralCoverArt(
+                  colors: coverColors,
+                  size: 52,
+                  radius: 14,
+                  imageUrl: firstTrack?.coverUrl,
+                ),
                 const Spacer(),
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -486,14 +493,20 @@ class _PlaylistCard extends StatelessWidget {
     );
   }
 
-  List<Color> _resolveCoverColors() {
+  static const List<Color> _defaultCoverColors = [
+    Color(0xFF1E293B),
+    Color(0xFF475569),
+    Color(0xFF38BDF8),
+  ];
+
+  Track? _resolveFirstTrack() {
     if (playlist.trackIds.isNotEmpty) {
       final firstId = playlist.trackIds.first;
       for (final track in tracks) {
-        if (track.id == firstId) return track.colors;
+        if (track.id == firstId) return track;
       }
     }
-    return const [Color(0xFF4F46E5), Color(0xFF06B6D4), Color(0xFFEC4899)];
+    return null;
   }
 }
 
@@ -625,6 +638,7 @@ class _Top100Sheet extends ConsumerWidget {
                             colors: track.colors,
                             size: 40,
                             radius: 10,
+                            imageUrl: track.coverUrl,
                           ),
                         ],
                       ),
@@ -814,6 +828,7 @@ class _PlaylistDetailSheet extends ConsumerWidget {
                               colors: track.colors,
                               size: 42,
                               radius: 11,
+                              imageUrl: track.coverUrl,
                             ),
                             title: Text(
                               track.title,

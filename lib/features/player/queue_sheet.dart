@@ -259,7 +259,12 @@ class _QueueSheetState extends ConsumerState<_QueueSheet> {
                     ),
                   ),
                 ),
-                ProceduralCoverArt(colors: track.colors, size: 42, radius: 11),
+                ProceduralCoverArt(
+                  colors: track.colors,
+                  size: 42,
+                  radius: 11,
+                  imageUrl: track.coverUrl,
+                ),
               ],
             ),
             title: Text(
@@ -319,6 +324,7 @@ class _QueueSheetState extends ConsumerState<_QueueSheet> {
             colors: track.colors,
             size: 42,
             radius: 11,
+            imageUrl: track.coverUrl,
           ),
           title: Text(
             track.title,

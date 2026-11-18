@@ -11,6 +11,7 @@ class ProceduralCoverArt extends StatelessWidget {
     required this.colors,
     this.size = 200.0,
     this.radius = 24.0,
+    this.imageUrl,
   });
 
   /// Palette of three colors used for the gradient and geometric glow circles.
@@ -21,6 +22,9 @@ class ProceduralCoverArt extends StatelessWidget {
 
   /// Corner radius of the [SquircleBorder] clip.
   final double radius;
+
+  /// Optional network cover image URL overlaid on the procedural background.
+  final String? imageUrl;
 
   List<Color> _normalizedColors() {
     if (colors.isEmpty) {
@@ -36,12 +40,25 @@ class ProceduralCoverArt extends StatelessWidget {
   Widget build(BuildContext context) {
     final List<Color> palette = _normalizedColors();
 
+    final String? url = imageUrl?.trim();
+
     return ClipPath(
       clipper: ShapeBorderClipper(shape: SquircleBorder(radius: radius)),
       child: SizedBox(
         width: size,
         height: size,
-        child: CustomPaint(painter: _ProceduralCoverPainter(colors: palette)),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            CustomPaint(painter: _ProceduralCoverPainter(colors: palette)),
+            if (url != null && url.isNotEmpty)
+              Image.network(
+                url,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => const SizedBox.shrink(),
+              ),
+          ],
+        ),
       ),
     );
   }
