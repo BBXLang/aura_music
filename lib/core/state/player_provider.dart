@@ -53,6 +53,7 @@ class PlayerState {
     required this.isPlaying,
     required this.progress,
     required this.activeLyric,
+    this.lyricLineProgress = 0.0,
     this.playMode = PlayMode.loopList,
     this.quality = AudioQuality.hiRes,
     this.desktopLyrics = false,
@@ -72,6 +73,7 @@ class PlayerState {
   final bool isPlaying;
   final double progress;
   final int activeLyric;
+  final double lyricLineProgress;
   final PlayMode playMode;
   final AudioQuality quality;
   final bool desktopLyrics;
@@ -110,6 +112,7 @@ class PlayerState {
     bool? isPlaying,
     double? progress,
     int? activeLyric,
+    double? lyricLineProgress,
     PlayMode? playMode,
     AudioQuality? quality,
     bool? desktopLyrics,
@@ -129,6 +132,7 @@ class PlayerState {
       isPlaying: isPlaying ?? this.isPlaying,
       progress: progress ?? this.progress,
       activeLyric: activeLyric ?? this.activeLyric,
+      lyricLineProgress: lyricLineProgress ?? this.lyricLineProgress,
       playMode: playMode ?? this.playMode,
       quality: quality ?? this.quality,
       desktopLyrics: desktopLyrics ?? this.desktopLyrics,
@@ -218,6 +222,18 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     _durationSub = _audioEngine.durationStream.listen((duration) {
       if (duration > Duration.zero) {
         _activeDuration = duration;
+        final track = state.currentTrack;
+        if (track != null &&
+            (track.durationSeconds - duration.inSeconds).abs() > 2) {
+          final updated = state.tracks
+              .map(
+                (t) => t.id == track.id
+                    ? t.copyWith(durationSeconds: duration.inSeconds)
+                    : t,
+              )
+              .toList(growable: false);
+          state = state.copyWith(tracks: List<Track>.unmodifiable(updated));
+        }
       }
     });
 
@@ -225,6 +241,46 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     _completedSub = _audioEngine.onCompleted.listen((_) {
       nextTrack(auto: true);
     });
+
+    _audioBridge.setActionHandler((action) async {
+      switch (action) {
+        case 'prev':
+          prevTrack();
+          break;
+        case 'togglePlay':
+          togglePlay();
+          break;
+        case 'next':
+          nextTrack();
+          break;
+        case 'close':
+          if (state.desktopLyrics) {
+            toggleDesktopLyrics();
+          }
+          break;
+      }
+    });
+
+    if (state.desktopLyrics) {
+      final track = state.currentTrack;
+      final line =
+          (track != null &&
+              track.lyrics.isNotEmpty &&
+              state.activeLyric < track.lyrics.length)
+          ? track.lyrics[state.activeLyric]
+          : null;
+      final nextLine =
+          (track != null && state.activeLyric + 1 < track.lyrics.length)
+          ? track.lyrics[state.activeLyric + 1]
+          : null;
+      _audioBridge.setDesktopLyricsEnabled(
+        true,
+        currentLyric: line,
+        nextLyric: nextLine,
+        progress: state.lyricLineProgress,
+        isPlaying: state.isPlaying,
+      );
+    }
 
     const defaultSidecarPath =
         r'D:\code\Music\docs\huawei-1.0.0-windows-x64\bin\huawei-source.exe';
@@ -246,15 +302,36 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     if (totalMs <= 0) return;
 
     final nextProgress = (position.inMilliseconds / totalMs).clamp(0.0, 1.0);
+    final currentSec = position.inMilliseconds / 1000.0;
     var lyricIndex = state.activeLyric;
-    if (track != null && track.lyrics.isNotEmpty) {
-      lyricIndex = (nextProgress * track.lyrics.length).floor().clamp(
-        0,
-        track.lyrics.length - 1,
-      );
+    var lineProg = state.lyricLineProgress;
+
+    if (track != null && track.lyricLines.isNotEmpty) {
+      var found = 0;
+      for (var i = 0; i < track.lyricLines.length; i++) {
+        if (track.lyricLines[i].timeSeconds <= currentSec) {
+          found = i;
+        } else {
+          break;
+        }
+      }
+      lyricIndex = found;
+      lineProg = track.lineProgressAt(lyricIndex, currentSec);
+    } else if (track != null && track.lyrics.isNotEmpty) {
+      final exact = nextProgress * track.lyrics.length;
+      lyricIndex = exact.floor().clamp(0, track.lyrics.length - 1);
+      lineProg = (exact - lyricIndex).clamp(0.0, 1.0);
     }
 
-    state = state.copyWith(progress: nextProgress, activeLyric: lyricIndex);
+    state = state.copyWith(
+      progress: nextProgress,
+      activeLyric: lyricIndex,
+      lyricLineProgress: lineProg,
+    );
+
+    if (state.desktopLyrics && track != null && track.lyrics.isNotEmpty) {
+      _syncDesktopLyricSnapshot(track, lyricIndex, lineProg);
+    }
   }
 
   @override
@@ -399,6 +476,13 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
           isPlaying: true,
           positionSeconds: _currentPositionSeconds(track),
         );
+        if (state.desktopLyrics) {
+          _syncDesktopLyricSnapshot(
+            track,
+            state.activeLyric,
+            state.lyricLineProgress,
+          );
+        }
       }
     } else {
       unawaited(_audioEngine.pause());
@@ -409,6 +493,13 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
           isPlaying: false,
           positionSeconds: _currentPositionSeconds(track),
         );
+        if (state.desktopLyrics) {
+          _syncDesktopLyricSnapshot(
+            track,
+            state.activeLyric,
+            state.lyricLineProgress,
+          );
+        }
       }
     }
   }
@@ -476,21 +567,38 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     final clamped = value.clamp(0.0, 1.0);
     final track = state.currentTrack;
     var lyricIndex = state.activeLyric;
+    var lineProg = 0.0;
 
-    if (track != null && track.lyrics.isNotEmpty) {
-      lyricIndex = (clamped * track.lyrics.length).floor().clamp(
-        0,
-        track.lyrics.length - 1,
-      );
+    final totalMs =
+        (_activeDuration != null && _activeDuration!.inMilliseconds > 0)
+        ? _activeDuration!.inMilliseconds
+        : (track?.durationSeconds ?? 0) * 1000;
+
+    if (track != null && track.lyricLines.isNotEmpty && totalMs > 0) {
+      final targetSec = (totalMs * clamped) / 1000.0;
+      var found = 0;
+      for (var i = 0; i < track.lyricLines.length; i++) {
+        if (track.lyricLines[i].timeSeconds <= targetSec) {
+          found = i;
+        } else {
+          break;
+        }
+      }
+      lyricIndex = found;
+      lineProg = track.lineProgressAt(lyricIndex, targetSec);
+    } else if (track != null && track.lyrics.isNotEmpty) {
+      final exact = clamped * track.lyrics.length;
+      lyricIndex = exact.floor().clamp(0, track.lyrics.length - 1);
+      lineProg = (exact - lyricIndex).clamp(0.0, 1.0);
     }
 
-    state = state.copyWith(progress: clamped, activeLyric: lyricIndex);
+    state = state.copyWith(
+      progress: clamped,
+      activeLyric: lyricIndex,
+      lyricLineProgress: lineProg,
+    );
 
     if (track != null) {
-      final totalMs =
-          (_activeDuration != null && _activeDuration!.inMilliseconds > 0)
-          ? _activeDuration!.inMilliseconds
-          : track.durationSeconds * 1000;
       if (totalMs > 0) {
         unawaited(
           _audioEngine.seek(
@@ -501,7 +609,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       final posSeconds = (track.durationSeconds * clamped).round();
       _audioBridge.seek(posSeconds);
       if (state.desktopLyrics && track.lyrics.isNotEmpty) {
-        _audioBridge.updateDesktopLyricLine(track.lyrics[lyricIndex]);
+        _syncDesktopLyricSnapshot(track, lyricIndex, lineProg);
       }
     }
   }
@@ -512,25 +620,36 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     if (track == null || track.lyrics.isEmpty) return;
 
     final clampedIndex = index.clamp(0, track.lyrics.length - 1);
-    final nextProgress = clampedIndex / track.lyrics.length;
-
-    state = state.copyWith(activeLyric: clampedIndex, progress: nextProgress);
-
     final totalMs =
         (_activeDuration != null && _activeDuration!.inMilliseconds > 0)
         ? _activeDuration!.inMilliseconds
         : track.durationSeconds * 1000;
-    if (totalMs > 0) {
-      unawaited(
-        _audioEngine.seek(
-          Duration(milliseconds: (totalMs * nextProgress).round()),
-        ),
-      );
+
+    double nextProgress;
+    int seekMs;
+    if (track.lyricLines.isNotEmpty &&
+        clampedIndex < track.lyricLines.length &&
+        totalMs > 0) {
+      final targetSec = track.lyricLines[clampedIndex].timeSeconds;
+      seekMs = (targetSec * 1000).round();
+      nextProgress = (seekMs / totalMs).clamp(0.0, 1.0);
+    } else {
+      nextProgress = clampedIndex / track.lyrics.length;
+      seekMs = (totalMs * nextProgress).round();
     }
-    final posSeconds = (track.durationSeconds * nextProgress).round();
-    _audioBridge.seek(posSeconds);
+
+    state = state.copyWith(
+      activeLyric: clampedIndex,
+      progress: nextProgress,
+      lyricLineProgress: 0.0,
+    );
+
+    if (totalMs > 0) {
+      unawaited(_audioEngine.seek(Duration(milliseconds: seekMs)));
+    }
+    _audioBridge.seek((seekMs / 1000).round());
     if (state.desktopLyrics) {
-      _audioBridge.updateDesktopLyricLine(track.lyrics[clampedIndex]);
+      _syncDesktopLyricSnapshot(track, clampedIndex, 0.0);
     }
   }
 
@@ -989,7 +1108,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     _persistSettings();
   }
 
-  /// Toggles HarmonyOS desktop floating lyrics window.
+  /// Toggles HarmonyOS/Windows floating desktop lyrics window.
   void toggleDesktopLyrics() {
     final nextValue = !state.desktopLyrics;
     state = state.copyWith(desktopLyrics: nextValue);
@@ -1001,7 +1120,17 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
             state.activeLyric < track.lyrics.length)
         ? track.lyrics[state.activeLyric]
         : null;
-    _audioBridge.setDesktopLyricsEnabled(nextValue, currentLyric: line);
+    final nextLine =
+        (track != null && state.activeLyric + 1 < track.lyrics.length)
+        ? track.lyrics[state.activeLyric + 1]
+        : null;
+    _audioBridge.setDesktopLyricsEnabled(
+      nextValue,
+      currentLyric: line,
+      nextLyric: nextLine,
+      progress: state.lyricLineProgress,
+      isPlaying: state.isPlaying,
+    );
     _persistSettings();
   }
 
@@ -1044,8 +1173,22 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     _audioBridge.updateMetadata(track);
     _audioBridge.updatePlaybackState(isPlaying: true, positionSeconds: 0);
     if (state.desktopLyrics && track.lyrics.isNotEmpty) {
-      _audioBridge.updateDesktopLyricLine(track.lyrics.first);
+      _syncDesktopLyricSnapshot(track, 0, 0.0);
     }
+  }
+
+  void _syncDesktopLyricSnapshot(Track track, int lyricIndex, double lineProg) {
+    if (track.lyrics.isEmpty) return;
+    final safeIdx = lyricIndex.clamp(0, track.lyrics.length - 1);
+    final nextLine = safeIdx + 1 < track.lyrics.length
+        ? track.lyrics[safeIdx + 1]
+        : '';
+    _audioBridge.updateDesktopLyricLine(
+      track.lyrics[safeIdx],
+      nextLine: nextLine,
+      progress: lineProg,
+      isPlaying: state.isPlaying,
+    );
   }
 
   void _persistPlaylists() {
@@ -1186,11 +1329,14 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     final client = _sidecar;
     if (client == null) return;
     final url = await client.resolveStreamUrl(track);
-    final lyrics = await client.fetchLyrics(track.id);
+    final timedLyrics = await client.fetchTimedLyrics(track.id);
     if (!mounted) return;
     final resolved = track.copyWith(
       streamUrl: url ?? track.streamUrl,
-      lyrics: lyrics.isNotEmpty ? lyrics : track.lyrics,
+      lyricLines: timedLyrics.isNotEmpty ? timedLyrics : track.lyricLines,
+      lyrics: timedLyrics.isNotEmpty
+          ? timedLyrics.map((l) => l.text).toList(growable: false)
+          : track.lyrics,
     );
     final updatedTracks = [
       for (final t in state.tracks)

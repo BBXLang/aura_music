@@ -54,9 +54,11 @@ class _AuraMusicAppState extends ConsumerState<AuraMusicApp> {
     return MaterialApp(
       title: 'AuraMusic',
       debugShowCheckedModeBanner: false,
-      theme: isDark
-          ? ThemeData.dark(useMaterial3: true)
-          : ThemeData.light(useMaterial3: true),
+      theme: ThemeData(
+        useMaterial3: true,
+        brightness: isDark ? Brightness.dark : Brightness.light,
+        fontFamily: 'HarmonyOS Sans',
+      ),
       home: const AuraAppShell(),
     );
   }

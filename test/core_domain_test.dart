@@ -1,3 +1,4 @@
+import 'package:aura_music/core/audio/audio_engine.dart';
 import 'package:aura_music/core/audio/ohos_audio_bridge.dart';
 import 'package:aura_music/core/models/playlist.dart';
 import 'package:aura_music/core/models/track.dart';
@@ -266,6 +267,56 @@ void main() {
           notifier.state.sources.firstWhere((s) => s.id == 'qq').connected,
           isTrue,
         );
+      },
+    );
+
+    test(
+      'timed & word-synced lyrics update activeLyric and lineProgress',
+      () async {
+        final engine = NoopAudioEngine();
+        final notifier = PlayerNotifier(audioEngine: engine);
+        await notifier.init();
+
+        final timedTrack = Track(
+          id: 'trk_timed',
+          title: '成都',
+          artist: '赵雷',
+          album: '成都',
+          quality: 'Hi-Res',
+          sourceId: 'local',
+          durationSeconds: 300,
+          colors: sampleTracks.first.colors,
+          lyrics: const ['让我掉下眼泪的', '不止昨夜的酒'],
+          lyricLines: const [
+            LyricLine(
+              timeSeconds: 10.0,
+              text: '让我掉下眼泪的',
+              words: [
+                LyricWord(timeSeconds: 10.0, text: '让我'),
+                LyricWord(timeSeconds: 11.0, text: '掉下'),
+                LyricWord(timeSeconds: 12.0, text: '眼泪'),
+                LyricWord(timeSeconds: 13.0, text: '的'),
+              ],
+            ),
+            LyricLine(timeSeconds: 15.0, text: '不止昨夜的酒'),
+          ],
+        );
+        expect(timedTrack.lineProgressAt(0, 11.5), closeTo(0.5, 0.01));
+
+        notifier.state = notifier.state.copyWith(
+          tracks: [...notifier.state.tracks, timedTrack],
+        );
+        notifier.playTrack('trk_timed');
+        engine.emitPosition(const Duration(milliseconds: 11500));
+        await Future<void>.delayed(Duration.zero);
+        expect(notifier.state.activeLyric, 0);
+        expect(notifier.state.lyricLineProgress, closeTo(0.5, 0.01));
+
+        engine.emitPosition(const Duration(milliseconds: 16000));
+        await Future<void>.delayed(Duration.zero);
+        expect(notifier.state.activeLyric, 1);
+
+        notifier.dispose();
       },
     );
   });

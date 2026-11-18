@@ -115,14 +115,50 @@ class OhosAudioBridge {
     'positionSeconds': positionSeconds < 0 ? 0 : positionSeconds,
   });
 
-  /// Toggles the HarmonyOS floating desktop lyrics window.
-  Future<void> setDesktopLyricsEnabled(bool enabled, {String? currentLyric}) =>
-      _invokeSafe('setDesktopLyricsEnabled', {
-        'enabled': enabled,
-        if (currentLyric != null) 'currentLyric': currentLyric,
-      });
+  /// Registers a callback handler for desktop lyrics window actions
+  /// (`'prev'`, `'togglePlay'`, `'next'`, `'close'`).
+  void setActionHandler(Future<void> Function(String action)? handler) {
+    if (handler == null) {
+      _channel.setMethodCallHandler(null);
+      return;
+    }
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'onDesktopLyricsAction') {
+        final action = call.arguments is Map
+            ? call.arguments['action']?.toString()
+            : call.arguments?.toString();
+        if (action != null && action.isNotEmpty) {
+          await handler(action);
+        }
+      }
+    });
+  }
 
-  /// Updates the text displayed in the desktop lyrics float window.
-  Future<void> updateDesktopLyricLine(String line) =>
-      _invokeSafe('updateDesktopLyricLine', {'line': line});
+  /// Toggles the floating desktop lyrics window.
+  Future<void> setDesktopLyricsEnabled(
+    bool enabled, {
+    String? currentLyric,
+    String? nextLyric,
+    double progress = 0.0,
+    bool isPlaying = false,
+  }) => _invokeSafe('setDesktopLyricsEnabled', {
+    'enabled': enabled,
+    if (currentLyric != null) 'currentLyric': currentLyric,
+    if (nextLyric != null) 'nextLyric': nextLyric,
+    'progress': progress.clamp(0.0, 1.0),
+    'isPlaying': isPlaying,
+  });
+
+  /// Updates the text and karaoke sweep progress displayed in desktop lyrics.
+  Future<void> updateDesktopLyricLine(
+    String line, {
+    String? nextLine,
+    double progress = 0.0,
+    bool? isPlaying,
+  }) => _invokeSafe('updateDesktopLyricLine', {
+    'line': line,
+    if (nextLine != null) 'nextLine': nextLine,
+    'progress': progress.clamp(0.0, 1.0),
+    if (isPlaying != null) 'isPlaying': isPlaying,
+  });
 }

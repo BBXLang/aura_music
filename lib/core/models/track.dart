@@ -1,5 +1,59 @@
 import 'package:flutter/material.dart';
 
+/// Represents a timed word inside a karaoke [LyricLine].
+class LyricWord {
+  /// Creates a [LyricWord].
+  const LyricWord({required this.timeSeconds, required this.text});
+
+  final double timeSeconds;
+  final String text;
+
+  /// Creates a [LyricWord] from a JSON map.
+  factory LyricWord.fromJson(Map<String, dynamic> json) {
+    return LyricWord(
+      timeSeconds: (json['time'] as num?)?.toDouble() ?? 0.0,
+      text: json['text']?.toString() ?? '',
+    );
+  }
+
+  /// Serializes this [LyricWord] to JSON.
+  Map<String, dynamic> toJson() => {'time': timeSeconds, 'text': text};
+}
+
+/// Represents a timestamped lyric line with optional word-by-word timings.
+class LyricLine {
+  /// Creates a [LyricLine].
+  const LyricLine({
+    required this.timeSeconds,
+    required this.text,
+    this.words = const [],
+  });
+
+  final double timeSeconds;
+  final String text;
+  final List<LyricWord> words;
+
+  /// Creates a [LyricLine] from a JSON map.
+  factory LyricLine.fromJson(Map<String, dynamic> json) {
+    final rawWords = json['words'] as List<dynamic>? ?? const [];
+    return LyricLine(
+      timeSeconds: (json['time'] as num?)?.toDouble() ?? 0.0,
+      text: json['text']?.toString() ?? '',
+      words: rawWords
+          .whereType<Map>()
+          .map((w) => LyricWord.fromJson(Map<String, dynamic>.from(w)))
+          .toList(growable: false),
+    );
+  }
+
+  /// Serializes this [LyricLine] to JSON.
+  Map<String, dynamic> toJson() => {
+    'time': timeSeconds,
+    'text': text,
+    if (words.isNotEmpty) 'words': words.map((w) => w.toJson()).toList(),
+  };
+}
+
 /// Represents an audio track in the AuraMusic library.
 class Track {
   /// Creates an immutable [Track] instance.
@@ -13,6 +67,7 @@ class Track {
     required this.durationSeconds,
     required this.colors,
     required this.lyrics,
+    this.lyricLines = const [],
     this.liked = false,
     this.localPath,
     this.streamUrl,
@@ -28,6 +83,7 @@ class Track {
   final int durationSeconds;
   final List<Color> colors;
   final List<String> lyrics;
+  final List<LyricLine> lyricLines;
   final bool liked;
   final String? localPath;
   final String? streamUrl;
@@ -37,6 +93,7 @@ class Track {
   factory Track.fromJson(Map<String, dynamic> json) {
     final rawColors = json['colors'] as List<dynamic>? ?? const [];
     final rawLyrics = json['lyrics'] as List<dynamic>? ?? const [];
+    final rawTimed = json['lyricLines'] as List<dynamic>? ?? const [];
     return Track(
       id: json['id'] as String? ?? '',
       title: json['title'] as String? ?? '',
@@ -50,6 +107,10 @@ class Track {
           .map((value) => Color(value.toInt()))
           .toList(),
       lyrics: rawLyrics.map((line) => line.toString()).toList(),
+      lyricLines: rawTimed
+          .whereType<Map>()
+          .map((l) => LyricLine.fromJson(Map<String, dynamic>.from(l)))
+          .toList(growable: false),
       liked: json['liked'] as bool? ?? false,
       localPath: json['localPath'] as String?,
       streamUrl: json['streamUrl'] as String?,
@@ -69,11 +130,35 @@ class Track {
       'durationSeconds': durationSeconds,
       'colors': colors.map((color) => color.toARGB32()).toList(),
       'lyrics': lyrics,
+      if (lyricLines.isNotEmpty)
+        'lyricLines': lyricLines.map((l) => l.toJson()).toList(),
       'liked': liked,
       if (localPath != null) 'localPath': localPath,
       if (streamUrl != null) 'streamUrl': streamUrl,
       if (coverUrl != null) 'coverUrl': coverUrl,
     };
+  }
+
+  /// Computes normalized `[0.0, 1.0]` karaoke progress within [lineIndex] at
+  /// [currentSeconds].
+  double lineProgressAt(int lineIndex, double currentSeconds) {
+    if (lyricLines.isEmpty || lineIndex < 0 || lineIndex >= lyricLines.length) {
+      return 1.0;
+    }
+    final line = lyricLines[lineIndex];
+    final nextTime = (lineIndex + 1 < lyricLines.length)
+        ? lyricLines[lineIndex + 1].timeSeconds
+        : durationSeconds.toDouble();
+    if (line.words.isNotEmpty) {
+      int activeWords = 0;
+      for (final w in line.words) {
+        if (currentSeconds >= w.timeSeconds) activeWords++;
+      }
+      return (activeWords / line.words.length).clamp(0.0, 1.0);
+    }
+    final span = nextTime - line.timeSeconds;
+    if (span <= 0.05) return 1.0;
+    return ((currentSeconds - line.timeSeconds) / span).clamp(0.0, 1.0);
   }
 
   /// Returns duration formatted as `mm:ss`.
@@ -95,6 +180,7 @@ class Track {
     int? durationSeconds,
     List<Color>? colors,
     List<String>? lyrics,
+    List<LyricLine>? lyricLines,
     bool? liked,
     String? localPath,
     String? streamUrl,
@@ -110,6 +196,7 @@ class Track {
       durationSeconds: durationSeconds ?? this.durationSeconds,
       colors: colors ?? this.colors,
       lyrics: lyrics ?? this.lyrics,
+      lyricLines: lyricLines ?? this.lyricLines,
       liked: liked ?? this.liked,
       localPath: localPath ?? this.localPath,
       streamUrl: streamUrl ?? this.streamUrl,

@@ -1,8 +1,49 @@
 #include "flutter_window.h"
 
+#include <flutter/standard_method_codec.h>
+
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
+
+namespace {
+
+std::string ReadStringArg(const flutter::EncodableMap& map, const char* key) {
+  auto it = map.find(flutter::EncodableValue(key));
+  if (it != map.end()) {
+    if (const auto* s = std::get_if<std::string>(&it->second)) {
+      return *s;
+    }
+  }
+  return "";
+}
+
+bool ReadBoolArg(const flutter::EncodableMap& map, const char* key,
+                 bool fallback) {
+  auto it = map.find(flutter::EncodableValue(key));
+  if (it != map.end()) {
+    if (const auto* b = std::get_if<bool>(&it->second)) {
+      return *b;
+    }
+  }
+  return fallback;
+}
+
+double ReadDoubleArg(const flutter::EncodableMap& map, const char* key,
+                     double fallback) {
+  auto it = map.find(flutter::EncodableValue(key));
+  if (it != map.end()) {
+    if (const auto* d = std::get_if<double>(&it->second)) {
+      return *d;
+    }
+    if (const auto* i = std::get_if<int32_t>(&it->second)) {
+      return static_cast<double>(*i);
+    }
+  }
+  return fallback;
+}
+
+}  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -27,6 +68,66 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
+  lyrics_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "com.auramusic/ohos_audio",
+          &flutter::StandardMethodCodec::GetInstance());
+
+  desktop_lyrics_ = std::make_unique<DesktopLyricsWindow>(
+      [this](const std::string& action) {
+        if (lyrics_channel_) {
+          flutter::EncodableMap args;
+          args[flutter::EncodableValue("action")] =
+              flutter::EncodableValue(action);
+          lyrics_channel_->InvokeMethod(
+              "onDesktopLyricsAction",
+              std::make_unique<flutter::EncodableValue>(args));
+        }
+      });
+
+  lyrics_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) {
+        const auto* args =
+            std::get_if<flutter::EncodableMap>(call.arguments());
+        if (call.method_name() == "setDesktopLyricsEnabled" && args) {
+          const bool enabled = ReadBoolArg(*args, "enabled", false);
+          const std::string cur = ReadStringArg(*args, "currentLyric");
+          const std::string next = ReadStringArg(*args, "nextLyric");
+          const double prog = ReadDoubleArg(*args, "progress", 0.0);
+          const bool playing = ReadBoolArg(*args, "isPlaying", false);
+          if (!cur.empty() || !next.empty()) {
+            desktop_lyrics_->SetLyricState(cur, next, prog, playing);
+          }
+          desktop_lyrics_->SetEnabled(enabled);
+          result->Success();
+          return;
+        }
+        if (call.method_name() == "updateDesktopLyricLine" && args) {
+          const std::string cur = ReadStringArg(*args, "line");
+          const std::string next = ReadStringArg(*args, "nextLine");
+          const double prog = ReadDoubleArg(*args, "progress", 0.0);
+          const bool playing = ReadBoolArg(*args, "isPlaying", true);
+          desktop_lyrics_->SetLyricState(cur, next, prog, playing);
+          result->Success();
+          return;
+        }
+        if (call.method_name() == "updatePlaybackState" && args) {
+          const bool playing = ReadBoolArg(*args, "isPlaying", false);
+          desktop_lyrics_->SetIsPlaying(playing);
+          result->Success();
+          return;
+        }
+        if (call.method_name() == "pause" || call.method_name() == "resume") {
+          desktop_lyrics_->SetIsPlaying(call.method_name() == "resume");
+          result->Success();
+          return;
+        }
+        result->Success();
+      });
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
   });
@@ -40,6 +141,11 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  if (lyrics_channel_) {
+    lyrics_channel_->SetMethodCallHandler(nullptr);
+    lyrics_channel_ = nullptr;
+  }
+  desktop_lyrics_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }

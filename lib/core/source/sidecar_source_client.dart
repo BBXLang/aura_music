@@ -336,8 +336,8 @@ class SidecarSourceClient {
     }
   }
 
-  /// Fetches lyrics via `source.lyrics.get`.
-  Future<List<String>> fetchLyrics(String trackId) async {
+  /// Fetches timestamped & word-synced lyrics via `source.lyrics.get`.
+  Future<List<LyricLine>> fetchTimedLyrics(String trackId) async {
     if (!_sessionLoaded) {
       await verifySession();
     }
@@ -345,26 +345,65 @@ class SidecarSourceClient {
     try {
       final res = await call('source.lyrics.get', {'id': rawId});
       if (res is List) {
-        return res
-            .whereType<Map>()
-            .map((item) => item['text']?.toString().trim() ?? '')
-            .where((line) => line.isNotEmpty)
-            .toList();
+        final lines = <LyricLine>[];
+        for (final item in res.whereType<Map>()) {
+          final text = item['text']?.toString().trim() ?? '';
+          if (text.isEmpty) continue;
+          final timeSec = (item['time'] as num?)?.toDouble() ?? 0.0;
+          final rawWords = item['words'] as List<dynamic>? ?? const [];
+          final words = rawWords
+              .whereType<Map>()
+              .map(
+                (w) => LyricWord(
+                  timeSeconds: (w['time'] as num?)?.toDouble() ?? timeSec,
+                  text: w['text']?.toString() ?? '',
+                ),
+              )
+              .toList(growable: false);
+          lines.add(LyricLine(timeSeconds: timeSec, text: text, words: words));
+        }
+        return lines;
       }
       if (res is Map && res['lines'] is List) {
-        return (res['lines'] as List).map((e) => e.toString()).toList();
+        final raw = res['lines'] as List;
+        return [
+          for (int i = 0; i < raw.length; i++)
+            LyricLine(timeSeconds: i * 4.0, text: raw[i].toString()),
+        ];
       }
       if (res is Map && res['lrc'] is String) {
-        return (res['lrc'] as String)
-            .split('\n')
-            .map((l) => l.replaceAll(RegExp(r'\[[^\]]*\]'), '').trim())
-            .where((l) => l.isNotEmpty)
-            .toList();
+        return _parseLrc(res['lrc'] as String);
       }
       return const [];
     } catch (_) {
       return const [];
     }
+  }
+
+  static List<LyricLine> _parseLrc(String lrc) {
+    final reg = RegExp(r'\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]');
+    final lines = <LyricLine>[];
+    for (final raw in lrc.split('\n')) {
+      final match = reg.firstMatch(raw);
+      final text = raw.replaceAll(reg, '').trim();
+      if (text.isEmpty) continue;
+      double sec = 0.0;
+      if (match != null) {
+        final m = int.tryParse(match.group(1) ?? '0') ?? 0;
+        final s = int.tryParse(match.group(2) ?? '0') ?? 0;
+        final msStr = (match.group(3) ?? '0').padRight(3, '0');
+        final ms = int.tryParse(msStr.substring(0, 3)) ?? 0;
+        sec = m * 60.0 + s + ms / 1000.0;
+      }
+      lines.add(LyricLine(timeSeconds: sec, text: text));
+    }
+    return lines;
+  }
+
+  /// Fetches lyrics text lines via `source.lyrics.get`.
+  Future<List<String>> fetchLyrics(String trackId) async {
+    final timed = await fetchTimedLyrics(trackId);
+    return timed.map((l) => l.text).toList(growable: false);
   }
 
   /// Stops the Sidecar process cleanly.

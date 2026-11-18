@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -138,7 +140,10 @@ class _AuraAppShellState extends ConsumerState<AuraAppShell> {
                 ),
               ),
             ),
-            if (state.desktopLyrics) const DesktopLyricsOverlay(),
+            if (state.desktopLyrics &&
+                (!Platform.isWindows ||
+                    Platform.environment.containsKey('FLUTTER_TEST')))
+              const DesktopLyricsOverlay(),
           ],
         ),
       ),

@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -681,29 +683,21 @@ class _ImmersivePlayerPageState extends ConsumerState<ImmersivePlayerPage> {
   ) {
     if (track.lyrics.isEmpty) {
       return Center(
-        child: Text('暂无歌词', style: TextStyle(color: secondaryColor)),
+        child: Text(
+          '暂无歌词',
+          style: TextStyle(fontFamily: 'HarmonyOS Sans', color: secondaryColor),
+        ),
       );
     }
 
-    return ListView.separated(
-      itemCount: track.lyrics.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 18),
-      itemBuilder: (context, index) {
-        final active = index == state.activeLyric;
-        return GestureDetector(
-          onTap: () => notifier.jumpLyric(index),
-          child: AnimatedDefaultTextStyle(
-            duration: const Duration(milliseconds: 220),
-            style: TextStyle(
-              fontSize: active ? 22 : 17,
-              fontWeight: active ? FontWeight.w800 : FontWeight.w500,
-              color: active ? primaryColor : secondaryColor,
-              height: 1.4,
-            ),
-            child: Text(track.lyrics[index]),
-          ),
-        );
-      },
+    return _AppleMusicLyricsView(
+      trackId: track.id,
+      lyrics: track.lyrics,
+      activeLyric: state.activeLyric,
+      lineProgress: state.lyricLineProgress,
+      primaryColor: primaryColor,
+      secondaryColor: secondaryColor,
+      onJumpLyric: notifier.jumpLyric,
     );
   }
 
@@ -1016,6 +1010,213 @@ class _PlayPauseCircleButton extends StatelessWidget {
             isPlaying: isPlaying,
             size: size * 0.48,
             color: isDark ? Colors.black : Colors.white,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AppleMusicLyricsView extends StatefulWidget {
+  const _AppleMusicLyricsView({
+    required this.trackId,
+    required this.lyrics,
+    required this.activeLyric,
+    required this.lineProgress,
+    required this.primaryColor,
+    required this.secondaryColor,
+    required this.onJumpLyric,
+  });
+
+  final String trackId;
+  final List<String> lyrics;
+  final int activeLyric;
+  final double lineProgress;
+  final Color primaryColor;
+  final Color secondaryColor;
+  final ValueChanged<int> onJumpLyric;
+
+  @override
+  State<_AppleMusicLyricsView> createState() => _AppleMusicLyricsViewState();
+}
+
+class _AppleMusicLyricsViewState extends State<_AppleMusicLyricsView> {
+  final ScrollController _scrollController = ScrollController();
+  late List<GlobalKey> _lineKeys;
+  DateTime? _lastUserInteraction;
+
+  @override
+  void initState() {
+    super.initState();
+    _lineKeys = List.generate(widget.lyrics.length, (_) => GlobalKey());
+    _scheduleScrollToActive(immediate: true);
+  }
+
+  @override
+  void didUpdateWidget(_AppleMusicLyricsView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.lyrics.length != widget.lyrics.length ||
+        oldWidget.trackId != widget.trackId) {
+      _lineKeys = List.generate(widget.lyrics.length, (_) => GlobalKey());
+    }
+    if (oldWidget.activeLyric != widget.activeLyric ||
+        oldWidget.trackId != widget.trackId) {
+      _scheduleScrollToActive(immediate: oldWidget.trackId != widget.trackId);
+    }
+  }
+
+  void _scheduleScrollToActive({bool immediate = false}) {
+    final userPaused =
+        _lastUserInteraction != null &&
+        DateTime.now().difference(_lastUserInteraction!) <
+            const Duration(milliseconds: 2500);
+    if (userPaused && !immediate) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          widget.activeLyric < 0 ||
+          widget.activeLyric >= _lineKeys.length) {
+        return;
+      }
+      final ctx = _lineKeys[widget.activeLyric].currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.36,
+        duration: immediate
+            ? const Duration(milliseconds: 180)
+            : const Duration(milliseconds: 520),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return NotificationListener<ScrollStartNotification>(
+      onNotification: (notification) {
+        if (notification.dragDetails != null) {
+          _lastUserInteraction = DateTime.now();
+        }
+        return false;
+      },
+      child: ShaderMask(
+        shaderCallback: (rect) {
+          return const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.transparent,
+              Colors.black,
+              Colors.black,
+              Colors.transparent,
+            ],
+            stops: [0.0, 0.10, 0.88, 1.0],
+          ).createShader(rect);
+        },
+        blendMode: BlendMode.dstIn,
+        child: SingleChildScrollView(
+          controller: _scrollController,
+          padding: const EdgeInsets.symmetric(vertical: 96, horizontal: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var index = 0; index < widget.lyrics.length; index++)
+                _buildLine(index),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLine(int index) {
+    final dist = (index - widget.activeLyric).abs();
+    final isActive = dist == 0;
+    final sigma = dist == 0 ? 0.0 : (dist == 1 ? 0.6 : (dist == 2 ? 1.4 : 2.2));
+    final opacity = dist == 0
+        ? 1.0
+        : (dist == 1 ? 0.58 : (dist == 2 ? 0.38 : 0.22));
+    final scale = isActive ? 1.04 : 0.96;
+
+    Widget textWidget;
+    if (isActive) {
+      final p = widget.lineProgress.clamp(0.0, 1.0);
+      final pTail = (p + 0.08).clamp(0.0, 1.0);
+      textWidget = ShaderMask(
+        shaderCallback: (bounds) {
+          return LinearGradient(
+            colors: [
+              widget.primaryColor,
+              widget.primaryColor,
+              widget.primaryColor.withValues(alpha: 0.45),
+              widget.primaryColor.withValues(alpha: 0.45),
+            ],
+            stops: [0.0, p, pTail, 1.0],
+          ).createShader(bounds);
+        },
+        blendMode: BlendMode.srcIn,
+        child: Text(
+          widget.lyrics[index],
+          style: TextStyle(
+            fontFamily: 'HarmonyOS Sans',
+            fontSize: 23,
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+            height: 1.42,
+            shadows: [
+              Shadow(
+                color: widget.primaryColor.withValues(alpha: 0.28),
+                blurRadius: 14,
+              ),
+            ],
+          ),
+        ),
+      );
+    } else {
+      textWidget = Text(
+        widget.lyrics[index],
+        style: TextStyle(
+          fontFamily: 'HarmonyOS Sans',
+          fontSize: 19,
+          fontWeight: FontWeight.w600,
+          color: widget.secondaryColor,
+          height: 1.42,
+        ),
+      );
+    }
+
+    if (sigma > 0) {
+      textWidget = ImageFiltered(
+        imageFilter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+        child: textWidget,
+      );
+    }
+
+    return Padding(
+      key: _lineKeys[index],
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          _lastUserInteraction = null;
+          widget.onJumpLyric(index);
+        },
+        child: AnimatedScale(
+          scale: scale,
+          alignment: Alignment.centerLeft,
+          duration: const Duration(milliseconds: 380),
+          curve: Curves.easeOutCubic,
+          child: AnimatedOpacity(
+            opacity: opacity,
+            duration: const Duration(milliseconds: 320),
+            child: textWidget,
           ),
         ),
       ),
