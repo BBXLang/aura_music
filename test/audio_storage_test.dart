@@ -200,6 +200,25 @@ void main() {
             streamUrl: 'https://transient.signed.example/audio.flac',
             coverUrl: 'https://cdn.example/cover.jpg',
           ),
+          Track(
+            id: 'trk_local_1',
+            title: 'Local Song',
+            artist: 'Local Artist',
+            album: 'Local Album',
+            quality: 'SQ',
+            sourceId: 'local',
+            durationSeconds: 180,
+            colors: [Color(0xFF1E1B4B), Color(0xFF38BDF8)],
+            lyrics: ['Local Line'],
+            lyricLines: [
+              LyricLine(
+                timeSeconds: 2.0,
+                text: 'Local Line',
+                words: [LyricWord(timeSeconds: 2.0, text: 'Local')],
+              ),
+            ],
+            localPath: '/music/local.flac',
+          ),
         ];
         const playlists = [
           Playlist(
@@ -254,11 +273,14 @@ void main() {
 
         final loadedTracks = storage.loadTracks();
         expect(loadedTracks, isNotNull);
-        expect(loadedTracks!.single.id, 'hw_999');
-        expect(loadedTracks.single.coverUrl, 'https://cdn.example/cover.jpg');
-        expect(loadedTracks.single.lyricLines.single.words.length, 2);
-        // Transient Huawei streamUrl is omitted on disk so next play re-resolves.
-        expect(loadedTracks.single.streamUrl, isNull);
+        expect(loadedTracks, hasLength(2));
+        expect(loadedTracks!.first.id, 'hw_999');
+        expect(loadedTracks.first.coverUrl, 'https://cdn.example/cover.jpg');
+        // Transient Huawei streamUrl & verbose word-timed lyrics are stripped on disk.
+        expect(loadedTracks.first.streamUrl, isNull);
+        expect(loadedTracks.first.lyricLines, isEmpty);
+        expect(loadedTracks.last.id, 'trk_local_1');
+        expect(loadedTracks.last.lyricLines.single.words.length, 1);
 
         final loadedActiveQueue = storage.loadActiveQueue();
         expect(loadedActiveQueue, isNotNull);

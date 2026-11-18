@@ -44,9 +44,16 @@ abstract class AudioEngineAdapter {
 /// [AudioEngineAdapter] backed by `package:audioplayers`.
 class AudioPlayersEngine implements AudioEngineAdapter {
   /// Creates an [AudioPlayersEngine], optionally injecting a custom [AudioPlayer].
-  AudioPlayersEngine({AudioPlayer? player}) : _player = player ?? AudioPlayer();
+  AudioPlayersEngine({AudioPlayer? player})
+    : _player = player ?? AudioPlayer() {
+    _player.positionUpdater = TimerPositionUpdater(
+      getPosition: _player.getCurrentPosition,
+      interval: const Duration(milliseconds: 250),
+    );
+  }
 
   final AudioPlayer _player;
+  int _opToken = 0;
 
   Future<void> _runSafe(Future<void> Function() action) async {
     try {
@@ -57,15 +64,26 @@ class AudioPlayersEngine implements AudioEngineAdapter {
   }
 
   @override
-  Future<void> playUrl(String url) =>
-      _runSafe(() => _player.play(UrlSource(url)));
+  Future<void> playUrl(String url) async {
+    final token = ++_opToken;
+    await _runSafe(_player.stop);
+    if (token != _opToken) return;
+    await _runSafe(() => _player.play(UrlSource(url)));
+  }
 
   @override
-  Future<void> playFile(String path) =>
-      _runSafe(() => _player.play(DeviceFileSource(path)));
+  Future<void> playFile(String path) async {
+    final token = ++_opToken;
+    await _runSafe(_player.stop);
+    if (token != _opToken) return;
+    await _runSafe(() => _player.play(DeviceFileSource(path)));
+  }
 
   @override
-  Future<void> pause() => _runSafe(_player.pause);
+  Future<void> pause() {
+    ++_opToken;
+    return _runSafe(_player.pause);
+  }
 
   @override
   Future<void> resume() => _runSafe(_player.resume);
@@ -77,7 +95,10 @@ class AudioPlayersEngine implements AudioEngineAdapter {
   }
 
   @override
-  Future<void> stop() => _runSafe(_player.stop);
+  Future<void> stop() {
+    ++_opToken;
+    return _runSafe(_player.stop);
+  }
 
   @override
   Future<void> setVolume(double volume) =>

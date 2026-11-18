@@ -12,7 +12,17 @@ class SettingsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(playerProvider);
+    final sources = ref.watch(playerProvider.select((s) => s.sources));
+    final ambientEnabled = ref.watch(
+      playerProvider.select((s) => s.ambientEnabled),
+    );
+    final desktopLyrics = ref.watch(
+      playerProvider.select((s) => s.desktopLyrics),
+    );
+    final smartLocalFilter = ref.watch(
+      playerProvider.select((s) => s.smartLocalFilter),
+    );
+    final isDarkState = ref.watch(playerProvider.select((s) => s.isDark));
     final notifier = ref.read(playerProvider.notifier);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primaryColor = isDark ? Colors.white : const Color(0xFF0F172A);
@@ -86,7 +96,7 @@ class SettingsPage extends ConsumerWidget {
                   ),
                 ),
                 subtitle: Text(
-                  '共 ${state.sources.length} 个音源 · 支持开启、关闭、授权与删除',
+                  '共 ${sources.length} 个音源 · 支持开启、关闭、授权与删除',
                   style: TextStyle(fontSize: 12, color: secondaryColor),
                 ),
                 trailing: Icon(
@@ -99,7 +109,7 @@ class SettingsPage extends ConsumerWidget {
                   ),
                 ),
               ),
-              if (state.sources.isEmpty) ...[
+              if (sources.isEmpty) ...[
                 _divider(primaryColor),
                 Padding(
                   padding: const EdgeInsets.all(18),
@@ -109,38 +119,35 @@ class SettingsPage extends ConsumerWidget {
                   ),
                 ),
               ] else
-                for (var i = 0; i < state.sources.length; i++) ...[
+                for (var i = 0; i < sources.length; i++) ...[
                   _divider(primaryColor),
                   ListTile(
                     title: Text(
-                      state.sources[i].name,
+                      sources[i].name,
                       style: TextStyle(
                         fontWeight: FontWeight.w700,
-                        color: state.sources[i].enabled
+                        color: sources[i].enabled
                             ? primaryColor
                             : secondaryColor,
                       ),
                     ),
                     subtitle: Text(
-                      'v${state.sources[i].version} · ${state.sources[i].tierLabel}${state.sources[i].enabled ? '' : ' · 已关闭'}',
+                      'v${sources[i].version} · ${sources[i].tierLabel}${sources[i].enabled ? '' : ' · 已关闭'}',
                       style: TextStyle(fontSize: 12, color: secondaryColor),
                     ),
                     trailing: FilledButton.tonal(
-                      onPressed: () => handleSourceAuthAction(
-                        context,
-                        notifier,
-                        state.sources[i],
-                      ),
+                      onPressed: () =>
+                          handleSourceAuthAction(context, notifier, sources[i]),
                       style: FilledButton.styleFrom(
-                        backgroundColor: state.sources[i].connected
+                        backgroundColor: sources[i].connected
                             ? const Color(0xFF10B981).withValues(alpha: 0.18)
                             : primaryColor.withValues(alpha: 0.1),
-                        foregroundColor: state.sources[i].connected
+                        foregroundColor: sources[i].connected
                             ? const Color(0xFF10B981)
                             : primaryColor,
                       ),
                       child: Text(
-                        state.sources[i].connected ? '已授权' : 'OAuth 登录',
+                        sources[i].connected ? '已授权' : 'OAuth 登录',
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
                     ),
@@ -167,7 +174,7 @@ class SettingsPage extends ConsumerWidget {
               _SettingsSwitchTile(
                 title: '动态光感雾团',
                 subtitle: '随专辑主色调流动的环境光晕背景',
-                value: state.ambientEnabled,
+                value: ambientEnabled,
                 primaryColor: primaryColor,
                 secondaryColor: secondaryColor,
                 onChanged: (_) => notifier.toggleAmbient(),
@@ -176,7 +183,7 @@ class SettingsPage extends ConsumerWidget {
               _SettingsSwitchTile(
                 title: '桌面歌词',
                 subtitle: '在屏幕顶层悬浮显示实时滚动歌词',
-                value: state.desktopLyrics,
+                value: desktopLyrics,
                 primaryColor: primaryColor,
                 secondaryColor: secondaryColor,
                 onChanged: (_) => notifier.toggleDesktopLyrics(),
@@ -185,7 +192,7 @@ class SettingsPage extends ConsumerWidget {
               _SettingsSwitchTile(
                 title: '浅色云感主题',
                 subtitle: '切换纯净白昼云感毛玻璃视觉风格',
-                value: !state.isDark,
+                value: !isDarkState,
                 primaryColor: primaryColor,
                 secondaryColor: secondaryColor,
                 onChanged: (_) => notifier.toggleTheme(),
@@ -194,7 +201,7 @@ class SettingsPage extends ConsumerWidget {
               _SettingsSwitchTile(
                 title: '本地音乐智能过滤',
                 subtitle: '自动排除通话录音、系统铃声与过短音频',
-                value: state.smartLocalFilter,
+                value: smartLocalFilter,
                 primaryColor: primaryColor,
                 secondaryColor: secondaryColor,
                 onChanged: (_) => notifier.toggleSmartLocalFilter(),

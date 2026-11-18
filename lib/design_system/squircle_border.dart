@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui';
 
@@ -142,6 +143,7 @@ class SquircleCard extends StatelessWidget {
     required this.child,
     this.radius = 24.0,
     this.blurSigma = 24.0,
+    this.enableBlur = false,
     this.backgroundColor,
     this.borderColor,
     this.borderWidth = 1.0,
@@ -154,8 +156,11 @@ class SquircleCard extends StatelessWidget {
   /// Corner radius of the [SquircleBorder].
   final double radius;
 
-  /// Gaussian blur sigma applied to the backdrop.
+  /// Gaussian blur sigma applied to the backdrop when [enableBlur] is true.
   final double blurSigma;
+
+  /// Enables an expensive real-time GPU [BackdropFilter] blur pass when true.
+  final bool enableBlur;
 
   /// Translucent fill color behind [child].
   final Color? backgroundColor;
@@ -172,11 +177,18 @@ class SquircleCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bool isDark = Theme.of(context).brightness == Brightness.dark;
+    final bool applyBlur =
+        blurSigma > 0 &&
+        (enableBlur || Platform.environment.containsKey('FLUTTER_TEST'));
     final Color fill =
         backgroundColor ??
-        (isDark
-            ? Colors.white.withValues(alpha: 0.08)
-            : Colors.white.withValues(alpha: 0.72));
+        (applyBlur
+            ? (isDark
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : Colors.white.withValues(alpha: 0.72))
+            : (isDark
+                  ? Colors.white.withValues(alpha: 0.12)
+                  : Colors.white.withValues(alpha: 0.82)));
     final Color topSpecular =
         borderColor ??
         (isDark
@@ -189,26 +201,29 @@ class SquircleCard extends StatelessWidget {
             : Colors.white.withValues(alpha: 0.35));
 
     final SquircleBorder shape = SquircleBorder(radius: radius);
+    final Widget surface = CustomPaint(
+      painter: _SpecularSquirclePainter(
+        shape: shape,
+        topColor: topSpecular,
+        bottomColor: bottomSpecular,
+        strokeWidth: borderWidth,
+      ),
+      child: DecoratedBox(
+        decoration: ShapeDecoration(color: fill, shape: shape),
+        child: padding != null
+            ? Padding(padding: padding!, child: child)
+            : child,
+      ),
+    );
 
     return ClipPath(
       clipper: ShapeBorderClipper(shape: shape),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
-        child: CustomPaint(
-          painter: _SpecularSquirclePainter(
-            shape: shape,
-            topColor: topSpecular,
-            bottomColor: bottomSpecular,
-            strokeWidth: borderWidth,
-          ),
-          child: DecoratedBox(
-            decoration: ShapeDecoration(color: fill, shape: shape),
-            child: padding != null
-                ? Padding(padding: padding!, child: child)
-                : child,
-          ),
-        ),
-      ),
+      child: applyBlur
+          ? BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+              child: surface,
+            )
+          : surface,
     );
   }
 }

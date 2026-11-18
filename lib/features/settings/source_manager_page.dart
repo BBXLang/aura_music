@@ -17,21 +17,29 @@ class SourceManagerPage extends ConsumerWidget {
   /// Creates a [SourceManagerPage].
   const SourceManagerPage({super.key});
 
+  static const List<Color> _defaultColors = [
+    Color(0xFF1E1B4B),
+    Color(0xFF4338CA),
+    Color(0xFF38BDF8),
+  ];
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(playerProvider);
+    final sources = ref.watch(playerProvider.select((s) => s.sources));
+    final colors = ref.watch(
+      playerProvider.select((s) => s.currentTrack?.colors ?? _defaultColors),
+    );
+    final ambientEnabled = ref.watch(
+      playerProvider.select((s) => s.ambientEnabled),
+    );
+    final isDark = ref.watch(playerProvider.select((s) => s.isDark));
     final notifier = ref.read(playerProvider.notifier);
-    final track = state.currentTrack;
-    final colors =
-        track?.colors ??
-        const [Color(0xFF1E1B4B), Color(0xFF4338CA), Color(0xFF38BDF8)];
-    final isDark = state.isDark;
     final primaryColor = isDark ? Colors.white : const Color(0xFF0F172A);
     final secondaryColor = primaryColor.withValues(alpha: 0.64);
 
     return AmbientBackground(
       colors: colors,
-      enabled: state.ambientEnabled,
+      enabled: ambientEnabled,
       isDark: isDark,
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -54,7 +62,7 @@ class SourceManagerPage extends ConsumerWidget {
                     ),
                     Expanded(
                       child: Text(
-                        '音源管理 (${state.sources.length})',
+                        '音源管理 (${sources.length})',
                         style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.w800,
@@ -78,7 +86,7 @@ class SourceManagerPage extends ConsumerWidget {
                 ),
               ),
               Expanded(
-                child: state.sources.isEmpty
+                child: sources.isEmpty
                     ? Center(
                         child: Text(
                           '暂无已接入音源，可通过右上角导入 JS 插件或接入 Sidecar',
@@ -87,10 +95,10 @@ class SourceManagerPage extends ConsumerWidget {
                       )
                     : ListView.separated(
                         padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-                        itemCount: state.sources.length,
+                        itemCount: sources.length,
                         separatorBuilder: (_, _) => const SizedBox(height: 12),
                         itemBuilder: (context, index) {
-                          final source = state.sources[index];
+                          final source = sources[index];
                           return _SourceManagerCard(
                             source: source,
                             primaryColor: primaryColor,

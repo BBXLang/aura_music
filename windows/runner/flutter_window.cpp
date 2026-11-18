@@ -163,10 +163,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
-  if (lyrics_channel_) {
-    lyrics_channel_->SetMethodCallHandler(nullptr);
-    lyrics_channel_ = nullptr;
-  }
+  lyrics_channel_ = nullptr;
   desktop_lyrics_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;

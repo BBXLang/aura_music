@@ -39,25 +39,33 @@ class ProceduralCoverArt extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final List<Color> palette = _normalizedColors();
-
     final String? url = imageUrl?.trim();
+    final int cachePx = (size * 2).round().clamp(64, 480);
 
-    return ClipPath(
-      clipper: ShapeBorderClipper(shape: SquircleBorder(radius: radius)),
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            CustomPaint(painter: _ProceduralCoverPainter(colors: palette)),
-            if (url != null && url.isNotEmpty)
-              Image.network(
-                url,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => const SizedBox.shrink(),
-              ),
-          ],
+    return RepaintBoundary(
+      child: ClipPath(
+        clipper: ShapeBorderClipper(shape: SquircleBorder(radius: radius)),
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: (url != null && url.isNotEmpty)
+              ? Image.network(
+                  url,
+                  fit: BoxFit.cover,
+                  cacheWidth: cachePx,
+                  cacheHeight: cachePx,
+                  filterQuality: FilterQuality.low,
+                  frameBuilder: (context, child, frame, wasSync) {
+                    if (wasSync || frame != null) return child;
+                    return CustomPaint(
+                      painter: _ProceduralCoverPainter(colors: palette),
+                    );
+                  },
+                  errorBuilder: (_, _, _) => CustomPaint(
+                    painter: _ProceduralCoverPainter(colors: palette),
+                  ),
+                )
+              : CustomPaint(painter: _ProceduralCoverPainter(colors: palette)),
         ),
       ),
     );

@@ -50,13 +50,16 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     }
   }
 
-  List<Track> _resolveDisplayedTracks(PlayerState state) {
+  List<Track> _resolveDisplayedTracks(
+    List<Track> searchResults,
+    List<Track> tracks,
+  ) {
     final normalized = _query.trim().toLowerCase();
     if (normalized.isEmpty) {
-      return state.searchResults;
+      return searchResults;
     }
 
-    final localMatches = state.tracks
+    final localMatches = tracks
         .where(
           (t) =>
               t.title.toLowerCase().contains(normalized) ||
@@ -64,11 +67,10 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         )
         .toList(growable: false);
 
-    if (_query.trim() == _activeSidecarQuery &&
-        state.searchResults.isNotEmpty) {
+    if (_query.trim() == _activeSidecarQuery && searchResults.isNotEmpty) {
       final seen = <String>{};
       final combined = <Track>[];
-      for (final track in [...state.searchResults, ...localMatches]) {
+      for (final track in [...searchResults, ...localMatches]) {
         if (seen.add(track.id)) {
           combined.add(track);
         }
@@ -81,12 +83,18 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(playerProvider);
+    final searchResults = ref.watch(
+      playerProvider.select((s) => s.searchResults),
+    );
+    final tracks = ref.watch(playerProvider.select((s) => s.tracks));
+    final currentTrackId = ref.watch(
+      playerProvider.select((s) => s.currentTrackId),
+    );
     final notifier = ref.read(playerProvider.notifier);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primaryColor = isDark ? Colors.white : const Color(0xFF0F172A);
     final secondaryColor = primaryColor.withValues(alpha: 0.64);
-    final displayed = _resolveDisplayedTracks(state);
+    final displayed = _resolveDisplayedTracks(searchResults, tracks);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
@@ -178,7 +186,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                     separatorBuilder: (_, _) => const SizedBox(height: 10),
                     itemBuilder: (context, index) {
                       final track = displayed[index];
-                      final isCurrent = state.currentTrackId == track.id;
+                      final isCurrent = currentTrackId == track.id;
 
                       return GestureDetector(
                         onTap: () => _playImmediate(notifier, track),

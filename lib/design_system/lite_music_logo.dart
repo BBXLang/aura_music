@@ -17,44 +17,46 @@ class LiteMusicLogo extends StatelessWidget {
   Widget build(BuildContext context) {
     final shape = SquircleBorder(radius: size * 0.34);
 
-    return DecoratedBox(
-      decoration: ShapeDecoration(
-        color: Colors.white,
-        shape: shape,
-        shadows: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.14),
-            blurRadius: size * 0.25,
-            offset: Offset(0, size * 0.08),
-          ),
-        ],
-      ),
-      child: ClipPath(
-        clipper: ShapeBorderClipper(shape: shape),
-        child: SizedBox(
-          width: size,
-          height: size,
-          child: ColoredBox(
-            color: Colors.white,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                CustomPaint(
-                  size: Size.square(size),
-                  painter: const _BluePinkMistPainter(),
-                ),
-                Icon(
-                  Icons.graphic_eq_rounded,
-                  size: size * 0.56,
-                  color: Colors.white,
-                  shadows: [
-                    Shadow(
-                      color: const Color(0xFF0F172A).withValues(alpha: 0.18),
-                      blurRadius: size * 0.12,
-                    ),
-                  ],
-                ),
-              ],
+    return RepaintBoundary(
+      child: DecoratedBox(
+        decoration: ShapeDecoration(
+          color: Colors.white,
+          shape: shape,
+          shadows: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.14),
+              blurRadius: size * 0.25,
+              offset: Offset(0, size * 0.08),
+            ),
+          ],
+        ),
+        child: ClipPath(
+          clipper: ShapeBorderClipper(shape: shape),
+          child: SizedBox(
+            width: size,
+            height: size,
+            child: ColoredBox(
+              color: Colors.white,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  CustomPaint(
+                    size: Size.square(size),
+                    painter: const _BluePinkMistPainter(),
+                  ),
+                  Icon(
+                    Icons.graphic_eq_rounded,
+                    size: size * 0.56,
+                    color: Colors.white,
+                    shadows: [
+                      Shadow(
+                        color: const Color(0xFF0F172A).withValues(alpha: 0.18),
+                        blurRadius: size * 0.12,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -71,7 +73,6 @@ class _BluePinkMistPainter extends CustomPainter {
     final w = size.width;
     final h = size.height;
     final center = Offset(w * 0.5, h * 0.5);
-    final blurSigma = (w * 0.085).clamp(1.5, 18.0);
 
     void drawMistLobe(
       Offset offset,
@@ -93,10 +94,9 @@ class _BluePinkMistPainter extends CustomPainter {
         ..shader = ui.Gradient.radial(
           Offset.zero,
           (rx > ry ? rx : ry) * w,
-          [inner, outer],
-          const [0.15, 1.0],
-        )
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, blurSigma);
+          [inner, inner.withValues(alpha: inner.a * 0.45), outer],
+          const [0.0, 0.55, 1.0],
+        );
       canvas.drawOval(rect, paint);
       canvas.restore();
     }

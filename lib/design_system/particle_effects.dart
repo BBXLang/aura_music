@@ -142,7 +142,7 @@ class _CoverParticleHaloPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_CoverParticleHaloPainter oldDelegate) {
-    return oldDelegate.progress != progress ||
+    return (oldDelegate.progress * 180).floor() != (progress * 180).floor() ||
         oldDelegate.color != color ||
         oldDelegate.particleCount != particleCount ||
         oldDelegate.isPlaying != isPlaying;
@@ -238,21 +238,23 @@ class _ConeProgressBarState extends State<ConeProgressBar>
           _handleSeek(details.localPosition),
       onHorizontalDragUpdate: (DragUpdateDetails details) =>
           _handleSeek(details.localPosition),
-      child: SizedBox(
-        height: widget.height,
-        width: double.infinity,
-        child: AnimatedBuilder(
-          animation: _controller,
-          builder: (BuildContext context, Widget? _) {
-            return CustomPaint(
-              painter: _ConeProgressPainter(
-                progress: clampedProgress,
-                trailPhase: _controller.value,
-                accentColor: widget.accentColor,
-                isDark: isDark,
-              ),
-            );
-          },
+      child: RepaintBoundary(
+        child: SizedBox(
+          height: widget.height,
+          width: double.infinity,
+          child: AnimatedBuilder(
+            animation: _controller,
+            builder: (BuildContext context, Widget? _) {
+              return CustomPaint(
+                painter: _ConeProgressPainter(
+                  progress: clampedProgress,
+                  trailPhase: _controller.value,
+                  accentColor: widget.accentColor,
+                  isDark: isDark,
+                ),
+              );
+            },
+          ),
         ),
       ),
     );
@@ -378,11 +380,15 @@ class _ConeProgressPainter extends CustomPainter {
       )
       ..close();
 
-    // Soft outer glow around the cone tip
+    // Soft outer glow around the cone tip (translucent halo without blur shader pass).
     final Paint glowPaint = Paint()
-      ..color = accentColor.withValues(alpha: 0.75)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7.0);
+      ..color = accentColor.withValues(alpha: 0.28);
+    canvas.save();
+    canvas.translate(tipX, centerY);
+    canvas.scale(1.18, 1.45);
+    canvas.translate(-tipX, -centerY);
     canvas.drawPath(conePath, glowPaint);
+    canvas.restore();
 
     // Luminous core cone
     final Rect coneBounds = Rect.fromLTRB(
@@ -405,8 +411,8 @@ class _ConeProgressPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_ConeProgressPainter oldDelegate) {
-    return oldDelegate.progress != progress ||
-        oldDelegate.trailPhase != trailPhase ||
+    return (oldDelegate.progress - progress).abs() >= 0.001 ||
+        (oldDelegate.trailPhase * 60).floor() != (trailPhase * 60).floor() ||
         oldDelegate.accentColor != accentColor ||
         oldDelegate.isDark != isDark;
   }

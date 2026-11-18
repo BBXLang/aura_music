@@ -17,12 +17,17 @@ class HomePage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(playerProvider);
+    final hotTracks = ref.watch(playerProvider.select((s) => s.hotTracks));
+    final playlists = ref.watch(playerProvider.select((s) => s.playlists));
+    final tracks = ref.watch(playerProvider.select((s) => s.tracks));
+    final currentTrackId = ref.watch(
+      playerProvider.select((s) => s.currentTrackId),
+    );
     final notifier = ref.read(playerProvider.notifier);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primaryColor = isDark ? Colors.white : const Color(0xFF0F172A);
     final secondaryColor = primaryColor.withValues(alpha: 0.65);
-    final topTracks = state.hotTracks.take(10).toList(growable: false);
+    final topTracks = hotTracks.take(10).toList(growable: false);
     final width = MediaQuery.sizeOf(context).width;
     final crossAxisCount = width >= 900 ? 3 : 2;
 
@@ -50,7 +55,7 @@ class HomePage extends ConsumerWidget {
                   separatorBuilder: (_, _) => const SizedBox(width: 14),
                   itemBuilder: (context, index) {
                     final track = topTracks[index];
-                    final isCurrent = state.currentTrackId == track.id;
+                    final isCurrent = currentTrackId == track.id;
                     return _HotTrackCard(
                       track: track,
                       isCurrent: isCurrent,
@@ -67,7 +72,7 @@ class HomePage extends ConsumerWidget {
         GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          itemCount: state.playlists.length,
+          itemCount: playlists.length,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: crossAxisCount,
             mainAxisSpacing: 14,
@@ -75,10 +80,10 @@ class HomePage extends ConsumerWidget {
             childAspectRatio: 1.05,
           ),
           itemBuilder: (context, index) {
-            final playlist = state.playlists[index];
+            final playlist = playlists[index];
             return _PlaylistCard(
               playlist: playlist,
-              tracks: state.tracks,
+              tracks: tracks,
               primaryColor: primaryColor,
               secondaryColor: secondaryColor,
               onTap: () => _showPlaylistSheet(context, playlist),
@@ -562,7 +567,7 @@ class _Top100Sheet extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(playerProvider);
+    final hotTracks = ref.watch(playerProvider.select((s) => s.hotTracks));
     final notifier = ref.read(playerProvider.notifier);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primaryColor = isDark ? Colors.white : const Color(0xFF0F172A);
@@ -596,12 +601,12 @@ class _Top100Sheet extends ConsumerWidget {
                     ),
                   ),
                   FilledButton.icon(
-                    onPressed: state.hotTracks.isEmpty
+                    onPressed: hotTracks.isEmpty
                         ? null
                         : () {
                             notifier.replaceQueue(
                               'Top 100 榜单',
-                              state.hotTracks
+                              hotTracks
                                   .map((t) => t.id)
                                   .toList(growable: false),
                             );
@@ -614,7 +619,7 @@ class _Top100Sheet extends ConsumerWidget {
               ),
               const SizedBox(height: 12),
               Expanded(
-                child: state.hotTracks.isEmpty
+                child: hotTracks.isEmpty
                     ? Center(
                         child: Text(
                           '暂无热播榜单曲目',
@@ -622,9 +627,9 @@ class _Top100Sheet extends ConsumerWidget {
                         ),
                       )
                     : ListView.builder(
-                        itemCount: state.hotTracks.length,
+                        itemCount: hotTracks.length,
                         itemBuilder: (context, index) {
-                          final track = state.hotTracks[index];
+                          final track = hotTracks[index];
                           return ListTile(
                             contentPadding: const EdgeInsets.symmetric(
                               horizontal: 4,

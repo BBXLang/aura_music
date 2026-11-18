@@ -84,22 +84,31 @@ class _AuraAppShellState extends ConsumerState<AuraAppShell> {
     );
   }
 
+  static const List<Color> _defaultColors = [
+    Color(0xFF1E1B4B),
+    Color(0xFF4338CA),
+    Color(0xFF38BDF8),
+  ];
+
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(playerProvider);
-    final notifier = ref.read(playerProvider.notifier);
-    final track = state.currentTrack;
-    final colors =
-        track?.colors ??
-        const [Color(0xFF1E1B4B), Color(0xFF4338CA), Color(0xFF38BDF8)];
-    final isDark = state.isDark;
+    final isDark = ref.watch(playerProvider.select((s) => s.isDark));
+    final ambientEnabled = ref.watch(
+      playerProvider.select((s) => s.ambientEnabled),
+    );
+    final desktopLyrics = ref.watch(
+      playerProvider.select((s) => s.desktopLyrics),
+    );
+    final colors = ref.watch(
+      playerProvider.select((s) => s.currentTrack?.colors ?? _defaultColors),
+    );
     final primaryColor = isDark ? Colors.white : const Color(0xFF0F172A);
     final width = MediaQuery.sizeOf(context).width;
     final isDesktop = width >= 900;
 
     return AmbientBackground(
       colors: colors,
-      enabled: state.ambientEnabled,
+      enabled: ambientEnabled,
       isDark: isDark,
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -131,36 +140,17 @@ class _AuraAppShellState extends ConsumerState<AuraAppShell> {
                     constraints: BoxConstraints(
                       maxWidth: isDesktop ? 820 : 680,
                     ),
-                    child: LiquidDock(
+                    child: _ConnectedLiquidDock(
                       scrollVelocity: _scrollVelocity,
-                      cover: ProceduralCoverArt(
-                        colors: colors,
-                        size: 46,
-                        radius: 14,
-                        imageUrl: track?.coverUrl,
-                      ),
-                      title: track?.title ?? 'Lite Music',
-                      artist: track?.artist ?? '点击探索音乐',
-                      isPlaying: state.isPlaying,
-                      progress: state.progress,
-                      currentLyric:
-                          (track != null &&
-                              track.lyrics.isNotEmpty &&
-                              state.activeLyric < track.lyrics.length)
-                          ? track.lyrics[state.activeLyric]
-                          : '',
-                      lyricKey: '${track?.id ?? ''}_${state.activeLyric}',
-                      onSeek: notifier.seek,
-                      onTap: () => _openImmersivePlayer(context),
-                      onPlayPause: notifier.togglePlay,
-                      onNext: notifier.nextTrack,
+                      defaultColors: _defaultColors,
+                      onOpenPlayer: () => _openImmersivePlayer(context),
                       onOpenQueue: () => showQueueSheet(context),
                     ),
                   ),
                 ),
               ),
             ),
-            if (state.desktopLyrics &&
+            if (desktopLyrics &&
                 (!Platform.isWindows ||
                     Platform.environment.containsKey('FLUTTER_TEST')))
               const DesktopLyricsOverlay(),
@@ -247,10 +237,11 @@ class _AuraAppShellState extends ConsumerState<AuraAppShell> {
           ),
         ),
         Expanded(
-          child: IndexedStack(
-            index: _tabIndex,
-            children: const [HomePage(), SearchPage(), SettingsPage()],
-          ),
+          child: switch (_tabIndex) {
+            0 => const HomePage(),
+            1 => const SearchPage(),
+            _ => const SettingsPage(),
+          },
         ),
       ],
     );
@@ -388,6 +379,56 @@ class _DesktopSidebarItem extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _ConnectedLiquidDock extends ConsumerWidget {
+  const _ConnectedLiquidDock({
+    required this.scrollVelocity,
+    required this.defaultColors,
+    required this.onOpenPlayer,
+    required this.onOpenQueue,
+  });
+
+  final double scrollVelocity;
+  final List<Color> defaultColors;
+  final VoidCallback onOpenPlayer;
+  final VoidCallback onOpenQueue;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final track = ref.watch(playerProvider.select((s) => s.currentTrack));
+    final isPlaying = ref.watch(playerProvider.select((s) => s.isPlaying));
+    final progress = ref.watch(playerProvider.select((s) => s.progress));
+    final activeLyric = ref.watch(playerProvider.select((s) => s.activeLyric));
+    final notifier = ref.read(playerProvider.notifier);
+    final colors = track?.colors ?? defaultColors;
+
+    return LiquidDock(
+      scrollVelocity: scrollVelocity,
+      cover: ProceduralCoverArt(
+        colors: colors,
+        size: 46,
+        radius: 14,
+        imageUrl: track?.coverUrl,
+      ),
+      title: track?.title ?? 'Lite Music',
+      artist: track?.artist ?? '点击探索音乐',
+      isPlaying: isPlaying,
+      progress: progress,
+      currentLyric:
+          (track != null &&
+              track.lyrics.isNotEmpty &&
+              activeLyric < track.lyrics.length)
+          ? track.lyrics[activeLyric]
+          : '',
+      lyricKey: '${track?.id ?? ''}_$activeLyric',
+      onSeek: notifier.seek,
+      onTap: onOpenPlayer,
+      onPlayPause: notifier.togglePlay,
+      onNext: notifier.nextTrack,
+      onOpenQueue: onOpenQueue,
     );
   }
 }

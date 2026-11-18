@@ -179,6 +179,9 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
   StreamSubscription<void>? _completedSub;
   Duration? _activeDuration;
   Future<bool>? _sidecarConnecting;
+  int _sidecarResolveToken = 0;
+  Timer? _persistTracksTimer;
+  double _lastDesktopLyricProg = -1.0;
   bool _hasStartedCurrentSession = false;
   bool _initialized = false;
 
@@ -296,6 +299,8 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
         _activeDuration = duration;
         final track = state.currentTrack;
         if (track != null &&
+            track.sourceId != 'huawei' &&
+            !track.id.startsWith('hw_') &&
             (track.durationSeconds - duration.inSeconds).abs() > 2) {
           final updated = state.tracks
               .map(
@@ -397,19 +402,30 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       lineProg = (exact - lyricIndex).clamp(0.0, 1.0);
     }
 
-    state = state.copyWith(
-      progress: nextProgress,
-      activeLyric: lyricIndex,
-      lyricLineProgress: lineProg,
-    );
+    final lineChanged = lyricIndex != state.activeLyric;
+    final progressMoved = (nextProgress - state.progress).abs() >= 0.004;
+    final lineProgMoved = (lineProg - state.lyricLineProgress).abs() >= 0.02;
 
-    if (state.desktopLyrics && track != null && track.lyrics.isNotEmpty) {
+    if (lineChanged || progressMoved || lineProgMoved) {
+      state = state.copyWith(
+        progress: nextProgress,
+        activeLyric: lyricIndex,
+        lyricLineProgress: lineProg,
+      );
+    }
+
+    if (state.desktopLyrics &&
+        track != null &&
+        track.lyrics.isNotEmpty &&
+        (lineChanged || (lineProg - _lastDesktopLyricProg).abs() >= 0.03)) {
+      _lastDesktopLyricProg = lineProg;
       _syncDesktopLyricSnapshot(track, lyricIndex, lineProg);
     }
   }
 
   @override
   void dispose() {
+    _persistTracksTimer?.cancel();
     _positionSub?.cancel();
     _durationSub?.cancel();
     _completedSub?.cancel();
@@ -1421,6 +1437,12 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     for (final track in state.tracks) {
       if (track.id == trackId) return track;
     }
+    for (final track in state.hotTracks) {
+      if (track.id == trackId) return track;
+    }
+    for (final track in state.searchResults) {
+      if (track.id == trackId) return track;
+    }
     return null;
   }
 
@@ -1430,8 +1452,10 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
 
   void _syncNativeTrackStart(Track track) {
     _hasStartedCurrentSession = true;
+    _lastDesktopLyricProg = -1.0;
     if ((track.sourceId == 'huawei' || track.id.startsWith('hw_')) &&
         (track.streamUrl == null || track.streamUrl!.isEmpty)) {
+      unawaited(_audioEngine.stop());
       unawaited(playSidecarTrack(track));
       return;
     }
@@ -1463,8 +1487,73 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     );
   }
 
+  List<Track> _pruneTracksForStorage(PlayerState snapshot) {
+    final pinnedIds = <String>{
+      for (final pl in snapshot.playlists) ...pl.trackIds,
+      ...snapshot.queue,
+      for (final rq in snapshot.recentQueues) ...rq.trackIds,
+      for (final h in snapshot.playHistory) h.trackId,
+      for (final t in snapshot.hotTracks) t.id,
+      for (final t in snapshot.tracks)
+        if (t.liked) t.id,
+    };
+    const int maxExtra = 60;
+    final pinned = <Track>[];
+    final extra = <Track>[];
+    for (final t in snapshot.tracks) {
+      if (pinnedIds.contains(t.id)) {
+        pinned.add(t);
+      } else {
+        extra.add(t);
+      }
+    }
+    final keptExtra = extra.length <= maxExtra
+        ? extra
+        : extra.sublist(extra.length - maxExtra);
+    return [...pinned, ...keptExtra];
+  }
+
   void _persistTracks() {
-    unawaited(_storage.saveTracks(state.tracks));
+    if (_audioEngine is NoopAudioEngine) {
+      unawaited(_storage.saveTracks(_pruneTracksForStorage(state)));
+      return;
+    }
+    _persistTracksTimer?.cancel();
+    _persistTracksTimer = Timer(const Duration(milliseconds: 800), () {
+      if (!mounted) return;
+      unawaited(_storage.saveTracks(_pruneTracksForStorage(state)));
+    });
+  }
+
+  void _updateTrackInState(Track resolved) {
+    final updatedTracks = [
+      for (final t in state.tracks)
+        if (t.id == resolved.id) resolved else t,
+    ];
+    if (!updatedTracks.any((t) => t.id == resolved.id)) {
+      updatedTracks.add(resolved);
+    }
+    final updatedHot = state.hotTracks.any((t) => t.id == resolved.id)
+        ? [
+            for (final t in state.hotTracks)
+              if (t.id == resolved.id) resolved else t,
+          ]
+        : null;
+    final updatedSearch = state.searchResults.any((t) => t.id == resolved.id)
+        ? [
+            for (final t in state.searchResults)
+              if (t.id == resolved.id) resolved else t,
+          ]
+        : null;
+    state = state.copyWith(
+      tracks: List<Track>.unmodifiable(updatedTracks),
+      hotTracks: updatedHot != null
+          ? List<Track>.unmodifiable(updatedHot)
+          : null,
+      searchResults: updatedSearch != null
+          ? List<Track>.unmodifiable(updatedSearch)
+          : null,
+    );
   }
 
   void _persistHotTracks() {
@@ -1668,35 +1757,78 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
 
   /// Resolves stream URL & lyrics for a Sidecar track and starts playback.
   Future<void> playSidecarTrack(Track track) async {
+    final requestToken = ++_sidecarResolveToken;
+
+    if (state.currentTrackId != track.id) {
+      final hasTrack = state.tracks.any((t) => t.id == track.id);
+      final updatedQueue = List<String>.from(state.queue);
+      var targetIndex = updatedQueue.indexOf(track.id);
+      if (targetIndex == -1) {
+        updatedQueue.add(track.id);
+        targetIndex = updatedQueue.length - 1;
+      }
+      state = state.copyWith(
+        tracks: hasTrack
+            ? null
+            : List<Track>.unmodifiable([...state.tracks, track]),
+        queue: List<String>.unmodifiable(updatedQueue),
+        queuePos: targetIndex,
+        isPlaying: true,
+        progress: 0.0,
+        activeLyric: 0,
+        playHistory: _recordHistory(state.playHistory, track.id),
+      );
+      _persistActiveQueue();
+      _persistHistory();
+      unawaited(_audioEngine.stop());
+    }
+
     if (_sidecar == null && _sidecarConnecting != null) {
       await _sidecarConnecting;
     }
     final client = _sidecar;
-    if (client == null) return;
+    if (client == null || !mounted || requestToken != _sidecarResolveToken) {
+      return;
+    }
+
     final url = await client.resolveStreamUrl(track);
-    final timedLyrics = await client.fetchTimedLyrics(track.id);
-    if (!mounted) return;
-    final resolved = track.copyWith(
-      streamUrl: url ?? track.streamUrl,
-      lyricLines: timedLyrics.isNotEmpty ? timedLyrics : track.lyricLines,
-      lyrics: timedLyrics.isNotEmpty
-          ? timedLyrics.map((l) => l.text).toList(growable: false)
-          : track.lyrics,
-    );
-    final updatedTracks = [
-      for (final t in state.tracks)
-        if (t.id == resolved.id) resolved else t,
-    ];
-    if (!updatedTracks.any((t) => t.id == resolved.id)) {
-      updatedTracks.add(resolved);
-    }
-    state = state.copyWith(tracks: List<Track>.unmodifiable(updatedTracks));
-    _persistTracks();
-    if (resolved.streamUrl != null && resolved.streamUrl!.isNotEmpty) {
-      playTrack(resolved.id);
-    } else {
+    if (!mounted || requestToken != _sidecarResolveToken) return;
+
+    if (url == null || url.isEmpty) {
       state = state.copyWith(isPlaying: false);
+      return;
     }
+
+    _hasStartedCurrentSession = true;
+    _activeDuration = null;
+    _lastDesktopLyricProg = -1.0;
+
+    final resolvedWithUrl = track.copyWith(streamUrl: url);
+    _updateTrackInState(resolvedWithUrl);
+
+    unawaited(_audioEngine.playUrl(url));
+    _audioBridge.playTrack(resolvedWithUrl, quality: state.quality);
+    _audioBridge.updateMetadata(resolvedWithUrl);
+    _audioBridge.updatePlaybackState(isPlaying: true, positionSeconds: 0);
+
+    final timedLyrics = await client.fetchTimedLyrics(track.id);
+    if (!mounted || requestToken != _sidecarResolveToken) return;
+
+    if (timedLyrics.isNotEmpty) {
+      final resolvedWithLyrics = resolvedWithUrl.copyWith(
+        lyricLines: timedLyrics,
+        lyrics: timedLyrics.map((l) => l.text).toList(growable: false),
+      );
+      _updateTrackInState(resolvedWithLyrics);
+      if (state.desktopLyrics && resolvedWithLyrics.lyrics.isNotEmpty) {
+        _syncDesktopLyricSnapshot(
+          resolvedWithLyrics,
+          state.activeLyric,
+          state.lyricLineProgress,
+        );
+      }
+    }
+    _persistTracks();
   }
 }
 

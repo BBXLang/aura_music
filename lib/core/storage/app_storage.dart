@@ -152,6 +152,11 @@ class AppStorage {
             final map = item.toJson();
             if (item.sourceId == 'huawei' || item.id.startsWith('hw_')) {
               map.remove('streamUrl');
+              map.remove('lyricLines');
+              final rawLyrics = map['lyrics'];
+              if (rawLyrics is List && rawLyrics.length > 1) {
+                map['lyrics'] = [rawLyrics.first];
+              }
             }
             return map;
           })

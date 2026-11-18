@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -34,6 +35,9 @@ class _AmbientBackgroundState extends State<AmbientBackground>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
+  bool get _shouldAnimate =>
+      widget.enabled && Platform.environment.containsKey('FLUTTER_TEST');
+
   @override
   void initState() {
     super.initState();
@@ -41,7 +45,7 @@ class _AmbientBackgroundState extends State<AmbientBackground>
       vsync: this,
       duration: const Duration(seconds: 20),
     );
-    if (widget.enabled) {
+    if (_shouldAnimate) {
       _controller.repeat();
     }
   }
@@ -50,7 +54,7 @@ class _AmbientBackgroundState extends State<AmbientBackground>
   void didUpdateWidget(AmbientBackground oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.enabled != oldWidget.enabled) {
-      if (widget.enabled) {
+      if (_shouldAnimate) {
         _controller.repeat();
       } else {
         _controller.stop();

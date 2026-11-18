@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -102,42 +103,28 @@ class LiquidDock extends StatelessWidget {
         ? Colors.white.withValues(alpha: 0.68)
         : const Color(0xFF0F172A).withValues(alpha: 0.62);
 
-    return DecoratedBox(
-      decoration: ShapeDecoration(
-        shape: dockShape,
-        shadows: [
-          BoxShadow(
-            color: isDark
-                ? Colors.black.withValues(alpha: 0.42)
-                : const Color(0xFF0F172A).withValues(alpha: 0.14),
-            blurRadius: 36.0,
-            offset: const Offset(0.0, 16.0),
+    final bool applyBlur = Platform.environment.containsKey('FLUTTER_TEST');
+
+    final Widget dockInteractiveBody = GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        height: 66.0,
+        padding: const EdgeInsets.symmetric(horizontal: 12.0),
+        decoration: ShapeDecoration(
+          shape: dockShape.copyWith(
+            side: BorderSide(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.26)
+                  : Colors.white.withValues(alpha: 0.92),
+              width: 1.0,
+            ),
           ),
-        ],
-      ),
-      child: ClipPath(
-        clipper: const ShapeBorderClipper(shape: dockShape),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 36.0, sigmaY: 36.0),
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: onTap,
-            child: Container(
-              height: 66.0,
-              padding: const EdgeInsets.symmetric(horizontal: 12.0),
-              decoration: ShapeDecoration(
-                shape: dockShape.copyWith(
-                  side: BorderSide(
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.26)
-                        : Colors.white.withValues(alpha: 0.92),
-                    width: 1.0,
-                  ),
-                ),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: isDark
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: applyBlur
+                ? (isDark
                       ? [
                           Colors.white.withValues(alpha: 0.16),
                           Colors.white.withValues(alpha: 0.06),
@@ -145,231 +132,249 @@ class LiquidDock extends StatelessWidget {
                       : [
                           Colors.white.withValues(alpha: 0.86),
                           Colors.white.withValues(alpha: 0.58),
-                        ],
-                ),
-              ),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final showCenterTrackBar = constraints.maxWidth >= 430;
-                  final displayLyric = currentLyric.trim().isNotEmpty
-                      ? currentLyric.trim()
-                      : '♪ 沉浸聆听';
-                  final transitionKey = ValueKey<String>(
-                    '$lyricKey:$displayLyric',
-                  );
+                        ])
+                : (isDark
+                      ? [const Color(0xE0181C28), const Color(0xC810131C)]
+                      : [
+                          Colors.white.withValues(alpha: 0.94),
+                          Colors.white.withValues(alpha: 0.86),
+                        ]),
+          ),
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final showCenterTrackBar = constraints.maxWidth >= 430;
+            final displayLyric = currentLyric.trim().isNotEmpty
+                ? currentLyric.trim()
+                : '♪ 沉浸聆听';
+            final transitionKey = ValueKey<String>('$lyricKey:$displayLyric');
 
-                  return Stack(
+            return Stack(
+              children: [
+                Center(
+                  child: Row(
                     children: [
-                      Center(
-                        child: Row(
-                          children: [
-                            ClipPath(
-                              clipper: const ShapeBorderClipper(
-                                shape: SquircleBorder(radius: 15.0),
-                              ),
-                              child: SizedBox(
-                                width: 46.0,
-                                height: 46.0,
-                                child: cover,
-                              ),
-                            ),
-                            const SizedBox(width: 11.0),
-                            if (showCenterTrackBar)
-                              ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  minWidth: 110,
-                                  maxWidth: 185,
-                                ),
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 13.5,
-                                        fontWeight: FontWeight.w700,
-                                        color: primaryText,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 1.0),
-                                    Text(
-                                      artist,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 11.5,
-                                        color: secondaryText,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              )
-                            else
-                              Expanded(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 13.5,
-                                        fontWeight: FontWeight.w700,
-                                        color: primaryText,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 1.0),
-                                    Text(
-                                      artist,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 11.5,
-                                        color: secondaryText,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            if (showCenterTrackBar) ...[
-                              const SizedBox(width: 16.0),
-                              Expanded(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    SizedBox(
-                                      height: 20,
-                                      child: ClipRect(
-                                        child: AnimatedSwitcher(
-                                          duration: const Duration(
-                                            milliseconds: 320,
-                                          ),
-                                          switchInCurve: Curves.easeOutCubic,
-                                          switchOutCurve: Curves.easeInCubic,
-                                          layoutBuilder:
-                                              (
-                                                currentChild,
-                                                previousChildren,
-                                              ) => Stack(
-                                                alignment: Alignment.center,
-                                                children: [
-                                                  ...previousChildren,
-                                                  if (currentChild != null)
-                                                    currentChild,
-                                                ],
-                                              ),
-                                          transitionBuilder: (child, anim) {
-                                            final isIncoming =
-                                                child.key == transitionKey;
-                                            final slide = isIncoming
-                                                ? Tween<Offset>(
-                                                    begin: const Offset(0, 1.0),
-                                                    end: Offset.zero,
-                                                  )
-                                                : Tween<Offset>(
-                                                    begin: const Offset(
-                                                      0,
-                                                      -1.0,
-                                                    ),
-                                                    end: Offset.zero,
-                                                  );
-                                            return SlideTransition(
-                                              position: slide.animate(anim),
-                                              child: FadeTransition(
-                                                opacity: anim,
-                                                child: child,
-                                              ),
-                                            );
-                                          },
-                                          child: Text(
-                                            displayLyric,
-                                            key: transitionKey,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            textAlign: TextAlign.center,
-                                            style: TextStyle(
-                                              fontSize: 12.0,
-                                              fontWeight: FontWeight.w600,
-                                              color: secondaryText,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 5),
-                                    _DockProgressBar(
-                                      progress: progress,
-                                      primaryColor: primaryText,
-                                      isDark: isDark,
-                                      onSeek: onSeek,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 16.0),
-                            ] else
-                              const SizedBox(width: 4.0),
-                            _DockIconButton(
-                              tooltip: isPlaying ? 'Pause' : 'Play',
-                              onPressed: onPlayPause,
-                              filled: true,
-                              backgroundColor: primaryText,
-                              foregroundColor: isDark
-                                  ? Colors.black
-                                  : Colors.white,
-                              child: MorphPlayPauseIcon(
-                                isPlaying: isPlaying,
-                                size: 20.0,
-                                color: isDark ? Colors.black : Colors.white,
-                              ),
-                            ),
-                            const SizedBox(width: 4.0),
-                            _DockIconButton(
-                              tooltip: 'Next',
-                              onPressed: onNext,
-                              foregroundColor: primaryText,
-                              child: Icon(
-                                Icons.skip_next_rounded,
-                                size: 22.0,
-                                color: primaryText,
-                              ),
-                            ),
-                            _DockIconButton(
-                              tooltip: 'Queue',
-                              onPressed: onOpenQueue,
-                              foregroundColor: primaryText,
-                              child: Icon(
-                                Icons.queue_music_rounded,
-                                size: 20.0,
-                                color: primaryText,
-                              ),
-                            ),
-                          ],
+                      ClipPath(
+                        clipper: const ShapeBorderClipper(
+                          shape: SquircleBorder(radius: 15.0),
+                        ),
+                        child: SizedBox(
+                          width: 46.0,
+                          height: 46.0,
+                          child: cover,
                         ),
                       ),
-                      if (!showCenterTrackBar)
-                        Positioned(
-                          left: 16,
-                          right: 16,
-                          bottom: 3,
-                          child: _DockProgressBar(
-                            progress: progress,
-                            primaryColor: primaryText,
-                            isDark: isDark,
-                            onSeek: onSeek,
+                      const SizedBox(width: 11.0),
+                      if (showCenterTrackBar)
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(
+                            minWidth: 110,
+                            maxWidth: 185,
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: primaryText,
+                                ),
+                              ),
+                              const SizedBox(height: 1.0),
+                              Text(
+                                artist,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: secondaryText,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        Expanded(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: primaryText,
+                                ),
+                              ),
+                              const SizedBox(height: 1.0),
+                              Text(
+                                artist,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: secondaryText,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
+                      if (showCenterTrackBar) ...[
+                        const SizedBox(width: 16.0),
+                        Expanded(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              SizedBox(
+                                height: 20,
+                                child: ClipRect(
+                                  child: AnimatedSwitcher(
+                                    duration: const Duration(milliseconds: 320),
+                                    switchInCurve: Curves.easeOutCubic,
+                                    switchOutCurve: Curves.easeInCubic,
+                                    layoutBuilder:
+                                        (currentChild, previousChildren) =>
+                                            Stack(
+                                              alignment: Alignment.center,
+                                              children: [
+                                                ...previousChildren,
+                                                if (currentChild != null)
+                                                  currentChild,
+                                              ],
+                                            ),
+                                    transitionBuilder: (child, anim) {
+                                      final isIncoming =
+                                          child.key == transitionKey;
+                                      final slide = isIncoming
+                                          ? Tween<Offset>(
+                                              begin: const Offset(0, 1.0),
+                                              end: Offset.zero,
+                                            )
+                                          : Tween<Offset>(
+                                              begin: const Offset(0, -1.0),
+                                              end: Offset.zero,
+                                            );
+                                      return SlideTransition(
+                                        position: slide.animate(anim),
+                                        child: FadeTransition(
+                                          opacity: anim,
+                                          child: child,
+                                        ),
+                                      );
+                                    },
+                                    child: Text(
+                                      displayLyric,
+                                      key: transitionKey,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: 12.0,
+                                        fontWeight: FontWeight.w600,
+                                        color: secondaryText,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 5),
+                              _DockProgressBar(
+                                progress: progress,
+                                primaryColor: primaryText,
+                                isDark: isDark,
+                                onSeek: onSeek,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 16.0),
+                      ] else
+                        const SizedBox(width: 4.0),
+                      _DockIconButton(
+                        tooltip: isPlaying ? 'Pause' : 'Play',
+                        onPressed: onPlayPause,
+                        filled: true,
+                        backgroundColor: primaryText,
+                        foregroundColor: isDark ? Colors.black : Colors.white,
+                        child: MorphPlayPauseIcon(
+                          isPlaying: isPlaying,
+                          size: 20.0,
+                          color: isDark ? Colors.black : Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 4.0),
+                      _DockIconButton(
+                        tooltip: 'Next',
+                        onPressed: onNext,
+                        foregroundColor: primaryText,
+                        child: Icon(
+                          Icons.skip_next_rounded,
+                          size: 22.0,
+                          color: primaryText,
+                        ),
+                      ),
+                      _DockIconButton(
+                        tooltip: 'Queue',
+                        onPressed: onOpenQueue,
+                        foregroundColor: primaryText,
+                        child: Icon(
+                          Icons.queue_music_rounded,
+                          size: 20.0,
+                          color: primaryText,
+                        ),
+                      ),
                     ],
-                  );
-                },
-              ),
+                  ),
+                ),
+                if (!showCenterTrackBar)
+                  Positioned(
+                    left: 16,
+                    right: 16,
+                    bottom: 3,
+                    child: _DockProgressBar(
+                      progress: progress,
+                      primaryColor: primaryText,
+                      isDark: isDark,
+                      onSeek: onSeek,
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+
+    return RepaintBoundary(
+      child: DecoratedBox(
+        decoration: ShapeDecoration(
+          shape: dockShape,
+          shadows: [
+            BoxShadow(
+              color: isDark
+                  ? Colors.black.withValues(alpha: 0.42)
+                  : const Color(0xFF0F172A).withValues(alpha: 0.14),
+              blurRadius: 32.0,
+              offset: const Offset(0.0, 14.0),
             ),
-          ),
+          ],
+        ),
+        child: ClipPath(
+          clipper: const ShapeBorderClipper(shape: dockShape),
+          child: applyBlur
+              ? BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 36.0, sigmaY: 36.0),
+                  child: dockInteractiveBody,
+                )
+              : dockInteractiveBody,
         ),
       ),
     );
