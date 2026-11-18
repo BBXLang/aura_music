@@ -11,6 +11,7 @@ import '../models/track.dart';
 import '../playlist/playlist_codec.dart';
 import '../scanner/local_music_scanner.dart';
 import '../source/js_plugin_bridge.dart';
+import '../source/sidecar_source_client.dart';
 import '../storage/app_storage.dart';
 
 /// Immutable snapshot of a previously active playback queue.
@@ -155,6 +156,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
   final OhosAudioBridge _audioBridge;
   final AudioEngineAdapter _audioEngine;
   final AppStorage _storage;
+  SidecarSourceClient? _sidecar;
 
   StreamSubscription<Duration>? _positionSub;
   StreamSubscription<Duration>? _durationSub;
@@ -249,6 +251,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     _positionSub?.cancel();
     _durationSub?.cancel();
     _completedSub?.cancel();
+    unawaited(_sidecar?.dispose());
     super.dispose();
   }
 
@@ -1065,6 +1068,87 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     return List<PlayHistoryEntry>.unmodifiable(
       [entry, ...current].take(_maxPlayHistory),
     );
+  }
+
+  /// Connects a Windows/Desktop Sidecar binary (e.g. `huawei-source.exe`)
+  /// using `Content-Length` JSON-RPC 2.0.
+  Future<bool> connectSidecar(String executablePath) async {
+    await _sidecar?.dispose();
+    final client = SidecarSourceClient(
+      sourceId: 'huawei',
+      storage: _storage,
+      executablePath: executablePath,
+    );
+    final started = await client.start();
+    if (!started) return false;
+    _sidecar = client;
+    final verified = await client.verifySession();
+    final plugin = SourcePlugin(
+      id: 'huawei',
+      name: '华为音乐 (Sidecar)',
+      version: '1.0.0',
+      connected: verified,
+      tierLabel: verified ? 'Sidecar 已登录' : '待 OAuth 登录',
+    );
+    final updated = [...state.sources.where((s) => s.id != 'huawei'), plugin];
+    state = state.copyWith(sources: List<SourcePlugin>.unmodifiable(updated));
+    _persistSources();
+    return true;
+  }
+
+  /// Triggers the Sidecar native WebView OAuth login flow.
+  Future<bool> loginSidecar() async {
+    final client = _sidecar;
+    if (client == null) return false;
+    final ok = await client.login();
+    if (!ok) return false;
+    final updated = state.sources
+        .map(
+          (s) => s.id == 'huawei'
+              ? s.copyWith(connected: true, tierLabel: 'Sidecar 已登录')
+              : s,
+        )
+        .toList(growable: false);
+    state = state.copyWith(sources: List<SourcePlugin>.unmodifiable(updated));
+    _persistSources();
+    return true;
+  }
+
+  /// Searches the connected Sidecar source and merges results into [state.tracks].
+  Future<List<Track>> searchSidecar(String query) async {
+    final client = _sidecar;
+    if (client == null || query.trim().isEmpty) return const [];
+    final results = await client.search(query.trim());
+    if (results.isEmpty) return const [];
+    final existing = state.tracks.map((t) => t.id).toSet();
+    final added = results.where((t) => !existing.contains(t.id)).toList();
+    if (added.isNotEmpty) {
+      state = state.copyWith(
+        tracks: List<Track>.unmodifiable([...state.tracks, ...added]),
+      );
+    }
+    return results;
+  }
+
+  /// Resolves stream URL & lyrics for a Sidecar track and starts playback.
+  Future<void> playSidecarTrack(Track track) async {
+    final client = _sidecar;
+    if (client == null) return;
+    final url = await client.resolveStreamUrl(track.id);
+    final lyrics = await client.fetchLyrics(track.id);
+    final resolved = track.copyWith(
+      streamUrl: url ?? track.streamUrl,
+      lyrics: lyrics.isNotEmpty ? lyrics : track.lyrics,
+    );
+    final updatedTracks = [
+      for (final t in state.tracks)
+        if (t.id == resolved.id) resolved else t,
+    ];
+    if (!updatedTracks.any((t) => t.id == resolved.id)) {
+      updatedTracks.add(resolved);
+    }
+    state = state.copyWith(tracks: List<Track>.unmodifiable(updatedTracks));
+    playTrack(resolved.id);
   }
 }
 

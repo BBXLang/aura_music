@@ -53,6 +53,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             child: TextField(
               controller: _controller,
               onChanged: (value) => setState(() => _query = value),
+              onSubmitted: (value) => notifier.searchSidecar(value),
               style: TextStyle(color: primaryColor, fontSize: 15),
               decoration: InputDecoration(
                 border: InputBorder.none,
@@ -90,7 +91,14 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                       final isCurrent = state.currentTrackId == track.id;
 
                       return GestureDetector(
-                        onTap: () => notifier.playTrack(track.id),
+                        onTap: () {
+                          if (track.sourceId == 'huawei' &&
+                              track.streamUrl == null) {
+                            notifier.playSidecarTrack(track);
+                          } else {
+                            notifier.playTrack(track.id);
+                          }
+                        },
                         child: SquircleCard(
                           radius: 18,
                           padding: const EdgeInsets.symmetric(

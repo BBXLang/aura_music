@@ -35,9 +35,15 @@ class SettingsPage extends ConsumerWidget {
               ),
             ),
             FilledButton.tonalIcon(
+              onPressed: () => _showSidecarDialog(context, notifier),
+              icon: const Icon(Icons.terminal_rounded, size: 16),
+              label: const Text('Sidecar'),
+            ),
+            const SizedBox(width: 8),
+            FilledButton.tonalIcon(
               onPressed: () => _showImportPluginDialog(context, notifier),
               icon: const Icon(Icons.extension_outlined, size: 16),
-              label: const Text('+ 导入 JS 插件'),
+              label: const Text('+ JS 插件'),
             ),
           ],
         ),
@@ -68,8 +74,21 @@ class SettingsPage extends ConsumerWidget {
                     style: TextStyle(fontSize: 12, color: secondaryColor),
                   ),
                   trailing: FilledButton.tonal(
-                    onPressed: () {
+                    onPressed: () async {
                       final source = state.sources[i];
+                      if (source.id == 'huawei' && !source.connected) {
+                        final ok = await notifier.loginSidecar();
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                ok ? 'Sidecar OAuth 登录成功' : 'Sidecar 登录未完成',
+                              ),
+                            ),
+                          );
+                        }
+                        return;
+                      }
                       if (source.connected) {
                         notifier.toggleOAuth(source.id);
                       } else {
@@ -310,6 +329,52 @@ class SettingsPage extends ConsumerWidget {
       },
     );
     tokenController.dispose();
+  }
+
+  Future<void> _showSidecarDialog(
+    BuildContext context,
+    PlayerNotifier notifier,
+  ) async {
+    final controller = TextEditingController(
+      text:
+          r'D:\code\Music\docs\huawei-1.0.0-windows-x64\bin\huawei-source.exe',
+    );
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('接入 Windows Sidecar 音源'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            labelText: '可执行文件路径',
+            hintText: r'...\bin\huawei-source.exe',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final ok = await notifier.connectSidecar(controller.text.trim());
+              if (!dialogContext.mounted) return;
+              Navigator.of(dialogContext).pop();
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    ok ? 'Sidecar 音源已连接，请点击 OAuth 登录' : '启动失败，请检查路径',
+                  ),
+                ),
+              );
+            },
+            child: const Text('连接'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
   }
 }
 
