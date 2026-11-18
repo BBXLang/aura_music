@@ -36,6 +36,10 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: flutter build windows --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aura-music-windows-x64
+          path: build/windows/x64/runner/Release
 
   build-android:
     name: Build Android APK
@@ -54,3 +58,7 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: flutter build apk --debug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aura-music-android-debug
+          path: build/app/outputs/flutter-apk/app-debug.apk
