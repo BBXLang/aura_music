@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../core/audio/ohos_audio_bridge.dart';
+import 'lite_music_logo.dart';
 
 /// Seamlessly integrated custom frameless title bar rendered on Windows desktop.
 ///
@@ -14,7 +15,7 @@ class WindowsTitleBar extends StatelessWidget {
     super.key,
     required this.primaryColor,
     required this.isDark,
-    this.title = 'AuraMusic',
+    this.title = 'Lite Music',
   });
 
   final Color primaryColor;
@@ -43,12 +44,8 @@ class WindowsTitleBar extends StatelessWidget {
                 padding: const EdgeInsets.only(left: 16),
                 child: Row(
                   children: [
-                    Icon(
-                      Icons.graphic_eq_rounded,
-                      size: 15,
-                      color: primaryColor.withValues(alpha: 0.72),
-                    ),
-                    const SizedBox(width: 7),
+                    const LiteMusicLogo(size: 20),
+                    const SizedBox(width: 8),
                     Text(
                       title,
                       style: TextStyle(

@@ -52,7 +52,7 @@ class _AuraMusicAppState extends ConsumerState<AuraMusicApp> {
     final isDark = ref.watch(playerProvider.select((state) => state.isDark));
 
     return MaterialApp(
-      title: 'AuraMusic',
+      title: 'Lite Music',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,

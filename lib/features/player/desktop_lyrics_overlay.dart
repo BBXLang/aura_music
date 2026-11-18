@@ -31,7 +31,7 @@ class _DesktopLyricsOverlayState extends ConsumerState<DesktopLyricsOverlay> {
             track.lyrics.isNotEmpty &&
             state.activeLyric < track.lyrics.length)
         ? track.lyrics[state.activeLyric]
-        : 'AuraMusic 桌面歌词';
+        : 'Lite Music 桌面歌词';
 
     final size = MediaQuery.sizeOf(context);
     final maxWidth = (size.width - 32).clamp(220.0, 380.0);
@@ -77,7 +77,7 @@ class _DesktopLyricsOverlayState extends ConsumerState<DesktopLyricsOverlay> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        track?.title ?? 'AuraMusic',
+                        track?.title ?? 'Lite Music',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(

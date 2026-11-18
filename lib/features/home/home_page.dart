@@ -22,7 +22,7 @@ class HomePage extends ConsumerWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primaryColor = isDark ? Colors.white : const Color(0xFF0F172A);
     final secondaryColor = primaryColor.withValues(alpha: 0.65);
-    final topTracks = state.tracks.take(10).toList(growable: false);
+    final topTracks = state.hotTracks.take(10).toList(growable: false);
     final width = MediaQuery.sizeOf(context).width;
     final crossAxisCount = width >= 900 ? 3 : 2;
 
@@ -39,7 +39,7 @@ class HomePage extends ConsumerWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 18),
                   child: Center(
                     child: Text(
-                      '暂无曲目 · 点击下方「扫描本地」或在设置接入 Sidecar / JS 音源',
+                      '暂无热播推荐 · 接入音源后自动获取或点击下方「扫描本地」',
                       style: TextStyle(fontSize: 13, color: secondaryColor),
                     ),
                   ),
@@ -167,7 +167,7 @@ class HomePage extends ConsumerWidget {
             ),
             _HeaderActionButton(
               icon: Icons.add_rounded,
-              label: '+ 新建',
+              label: '新建',
               primaryColor: primaryColor,
               isDark: isDark,
               onTap: () => _showCreateDialog(context, notifier),
@@ -587,7 +587,7 @@ class _Top100Sheet extends ConsumerWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      'AuraMusic Top 100',
+                      'Lite Music 热播榜 Top 100',
                       style: TextStyle(
                         fontSize: 19,
                         fontWeight: FontWeight.w800,
@@ -596,13 +596,17 @@ class _Top100Sheet extends ConsumerWidget {
                     ),
                   ),
                   FilledButton.icon(
-                    onPressed: () {
-                      notifier.replaceQueue(
-                        'Top 100 榜单',
-                        state.tracks.map((t) => t.id).toList(growable: false),
-                      );
-                      Navigator.of(context).pop();
-                    },
+                    onPressed: state.hotTracks.isEmpty
+                        ? null
+                        : () {
+                            notifier.replaceQueue(
+                              'Top 100 榜单',
+                              state.hotTracks
+                                  .map((t) => t.id)
+                                  .toList(growable: false),
+                            );
+                            Navigator.of(context).pop();
+                          },
                     icon: const Icon(Icons.play_arrow_rounded, size: 18),
                     label: const Text('全部播放'),
                   ),
@@ -610,60 +614,75 @@ class _Top100Sheet extends ConsumerWidget {
               ),
               const SizedBox(height: 12),
               Expanded(
-                child: ListView.builder(
-                  itemCount: state.tracks.length,
-                  itemBuilder: (context, index) {
-                    final track = state.tracks[index];
-                    return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                      onTap: () => notifier.playTrack(track.id),
-                      leading: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(
-                            width: 24,
-                            child: Text(
-                              '${index + 1}',
-                              textAlign: TextAlign.center,
+                child: state.hotTracks.isEmpty
+                    ? Center(
+                        child: Text(
+                          '暂无热播榜单曲目',
+                          style: TextStyle(color: secondaryColor),
+                        ),
+                      )
+                    : ListView.builder(
+                        itemCount: state.hotTracks.length,
+                        itemBuilder: (context, index) {
+                          final track = state.hotTracks[index];
+                          return ListTile(
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                            ),
+                            onTap: () => notifier.playTrack(track.id),
+                            leading: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox(
+                                  width: 24,
+                                  child: Text(
+                                    '${index + 1}',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                      color: index < 3
+                                          ? const Color(0xFF38BDF8)
+                                          : secondaryColor,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                ProceduralCoverArt(
+                                  colors: track.colors,
+                                  size: 40,
+                                  radius: 10,
+                                  imageUrl: track.coverUrl,
+                                ),
+                              ],
+                            ),
+                            title: Text(
+                              track.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                fontWeight: FontWeight.w800,
-                                color: index < 3
-                                    ? const Color(0xFF38BDF8)
-                                    : secondaryColor,
+                                color: primaryColor,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          ProceduralCoverArt(
-                            colors: track.colors,
-                            size: 40,
-                            radius: 10,
-                            imageUrl: track.coverUrl,
-                          ),
-                        ],
+                            subtitle: Text(
+                              '${track.artist} · ${track.quality}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: secondaryColor,
+                                fontSize: 12,
+                              ),
+                            ),
+                            trailing: Text(
+                              track.formattedDuration,
+                              style: TextStyle(
+                                color: secondaryColor,
+                                fontSize: 12,
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                      title: Text(
-                        track.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: primaryColor,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      subtitle: Text(
-                        '${track.artist} · ${track.quality}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: secondaryColor, fontSize: 12),
-                      ),
-                      trailing: Text(
-                        track.formattedDuration,
-                        style: TextStyle(color: secondaryColor, fontSize: 12),
-                      ),
-                    );
-                  },
-                ),
               ),
             ],
           ),

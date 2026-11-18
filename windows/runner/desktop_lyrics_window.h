@@ -51,7 +51,7 @@ class DesktopLyricsWindow {
   bool tracking_leave_ = false;
   bool is_playing_ = false;
   double progress_ = 0.0;
-  std::wstring current_line_ = L"AuraMusic \u684C\u9762\u6B4C\u8BCD";
+  std::wstring current_line_ = L"Lite Music \u684C\u9762\u6B4C\u8BCD";
   std::wstring next_line_;
   RECT btn_rects_[5]{};
   int hover_btn_ = -1;

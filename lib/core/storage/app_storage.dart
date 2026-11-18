@@ -93,6 +93,7 @@ class AppStorage {
   }
 
   static const String _keyTracks = 'aura_tracks_v1';
+  static const String _keyHotTracks = 'aura_hot_tracks_v1';
   static const String _keyPlaylists = 'aura_playlists_v1';
   static const String _keyActiveQueue = 'aura_active_queue_v1';
   static const String _keyPlayHistory = 'aura_play_history_v1';
@@ -130,7 +131,21 @@ class AppStorage {
   ///
   /// Transient Huawei Sidecar stream URLs are omitted so fresh playable URLs
   /// are resolved on the next session.
-  Future<void> saveTracks(List<Track> tracks) {
+  Future<void> saveTracks(List<Track> tracks) =>
+      _saveTrackList(_keyTracks, tracks);
+
+  /// Loads persisted tracks, or `null` if none have been saved.
+  List<Track>? loadTracks() => _loadTrackList(_keyTracks);
+
+  /// Persists curated [hotTracks] for home recommendations separately from
+  /// search results.
+  Future<void> saveHotTracks(List<Track> hotTracks) =>
+      _saveTrackList(_keyHotTracks, hotTracks);
+
+  /// Loads persisted hot tracks, or `null` if none have been saved.
+  List<Track>? loadHotTracks() => _loadTrackList(_keyHotTracks);
+
+  Future<void> _saveTrackList(String key, List<Track> tracks) {
     final encoded = jsonEncode(
       tracks
           .map((item) {
@@ -142,12 +157,11 @@ class AppStorage {
           })
           .toList(growable: false),
     );
-    return _writeString(_keyTracks, encoded);
+    return _writeString(key, encoded);
   }
 
-  /// Loads persisted tracks, or `null` if none have been saved.
-  List<Track>? loadTracks() {
-    final decoded = _decodeJson(_keyTracks);
+  List<Track>? _loadTrackList(String key) {
+    final decoded = _decodeJson(key);
     if (decoded is! List) return null;
     return decoded
         .whereType<Map>()
@@ -278,6 +292,7 @@ class AppStorage {
   Future<void> clearAll() async {
     const keys = [
       _keyTracks,
+      _keyHotTracks,
       _keyPlaylists,
       _keyActiveQueue,
       _keyPlayHistory,

@@ -1,10 +1,17 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:aura_music/core/audio/audio_engine.dart';
 import 'package:aura_music/core/audio/ohos_audio_bridge.dart';
 import 'package:aura_music/core/models/playlist.dart';
+import 'package:aura_music/core/models/source_plugin.dart';
 import 'package:aura_music/core/models/track.dart';
 import 'package:aura_music/core/scanner/local_music_scanner.dart';
 import 'package:aura_music/core/state/player_provider.dart';
+import 'package:aura_music/core/storage/app_storage.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -320,5 +327,138 @@ void main() {
         notifier.dispose();
       },
     );
+
+    test(
+      'unauthenticated OAuth sources default to disconnected and sanitize missing tokens',
+      () async {
+        final storage = AppStorage.memory();
+        await storage.saveSources(const [
+          SourcePlugin(
+            id: 'netease',
+            name: '网易云',
+            version: '1.0.0',
+            connected: true,
+            tierLabel: 'Hi-Res',
+          ),
+        ]);
+
+        final notifier = PlayerNotifier(storage: storage);
+        expect(notifier.state.sources.every((s) => !s.connected), isTrue);
+
+        await notifier.init();
+        expect(
+          notifier.state.sources.firstWhere((s) => s.id == 'netease').connected,
+          isFalse,
+        );
+
+        await notifier.authorizeOAuth('netease', token: '   ');
+        expect(
+          notifier.state.sources.firstWhere((s) => s.id == 'netease').connected,
+          isFalse,
+        );
+
+        notifier.dispose();
+      },
+    );
+
+    test(
+      'addTrackToPlaylist, playNextInQueue, toggleTrackLike, source enable/delete, and URL JS plugin import work cleanly',
+      () async {
+        final storage = AppStorage.memory();
+        final notifier = PlayerNotifier(storage: storage);
+        await notifier.init();
+
+        // Initial hotTracks match sampleTracks and stay separate from searchResults.
+        expect(notifier.state.hotTracks, hasLength(16));
+        expect(notifier.state.searchResults, isEmpty);
+
+        // Add track to specific user playlist.
+        const customTrack = Track(
+          id: 'trk_custom_url',
+          title: 'Custom Sky',
+          artist: 'Skyline',
+          album: 'Horizon',
+          quality: 'Hi-Res',
+          sourceId: 'remote_js',
+          durationSeconds: 205,
+          colors: [Color(0xFF0EA5E9), Color(0xFFF472B6)],
+          lyrics: ['Look up at the sky'],
+          streamUrl: 'https://example.com/sky.flac',
+        );
+        notifier.createPlaylist('晨间咖啡');
+        final targetPl = notifier.state.playlists.firstWhere(
+          (p) => p.name == '晨间咖啡',
+        );
+        final added = notifier.addTrackToPlaylist(targetPl.id, customTrack);
+        expect(added, isTrue);
+        expect(
+          notifier.state.playlists
+              .firstWhere((p) => p.id == targetPl.id)
+              .trackIds,
+          contains('trk_custom_url'),
+        );
+
+        // Toggle like by ID.
+        notifier.toggleTrackLike('trk_custom_url');
+        expect(
+          notifier.state.tracks
+              .firstWhere((t) => t.id == 'trk_custom_url')
+              .liked,
+          isTrue,
+        );
+
+        // Play next in queue inserts right after queuePos without disrupting current track.
+        notifier.replaceQueue('主队列', ['trk_01', 'trk_02']);
+        notifier.playNextInQueue(customTrack);
+        expect(notifier.state.queue[0], 'trk_01');
+        expect(notifier.state.queue[1], 'trk_custom_url');
+        expect(notifier.state.queue[2], 'trk_02');
+
+        // Toggle source enabled & remove source.
+        notifier.toggleSourceEnabled('qq');
+        expect(
+          notifier.state.sources.firstWhere((s) => s.id == 'qq').enabled,
+          isFalse,
+        );
+        await notifier.removeSource('qq');
+        expect(notifier.state.sources.any((s) => s.id == 'qq'), isFalse);
+
+        // Import JS plugin from remote HTTP URL.
+        final fakeClient = _FakeHttpClient(
+          '// @id cloud_js\n// @name 云端音源\n// @version 2.1.0\n// @apiBase https://api.cloud.example.com',
+        );
+        final okUrl = await notifier.importPluginScript(
+          'https://cdn.example.com/plugins/cloud_js.js',
+          httpClient: fakeClient,
+        );
+        expect(okUrl, isTrue);
+        final imported = notifier.state.sources.firstWhere(
+          (s) => s.id == 'cloud_js',
+        );
+        expect(imported.name, '云端音源');
+        expect(
+          imported.importUrl,
+          'https://cdn.example.com/plugins/cloud_js.js',
+        );
+
+        notifier.dispose();
+      },
+    );
   });
+}
+
+class _FakeHttpClient extends http.BaseClient {
+  _FakeHttpClient(this._body);
+
+  final String _body;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final bytes = Uint8List.fromList(utf8.encode(_body));
+    return http.StreamedResponse(
+      Stream<List<int>>.fromIterable([bytes]),
+      200,
+      contentLength: bytes.length,
+    );
+  }
 }

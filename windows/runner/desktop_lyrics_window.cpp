@@ -93,7 +93,7 @@ void DesktopLyricsWindow::EnsureCreated() {
 
   hwnd_ = CreateWindowExW(
       WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-      kDesktopLyricsClass, L"AuraMusic Lyrics", WS_POPUP, x, y, kWindowWidth,
+      kDesktopLyricsClass, L"Lite Music Lyrics", WS_POPUP, x, y, kWindowWidth,
       kWindowHeight, nullptr, nullptr, GetModuleHandleW(nullptr), this);
 }
 
@@ -209,8 +209,8 @@ void DesktopLyricsWindow::Render() {
           Gdiplus::RectF(4.0f, 4.0f, static_cast<float>(kWindowWidth - 8),
                          static_cast<float>(kWindowHeight - 8)),
           24.0f);
-      Gdiplus::SolidBrush bg_brush(Gdiplus::Color(178, 15, 23, 42));
-      Gdiplus::Pen border_pen(Gdiplus::Color(70, 255, 255, 255), 1.0f);
+      Gdiplus::SolidBrush bg_brush(Gdiplus::Color(168, 24, 24, 28));
+      Gdiplus::Pen border_pen(Gdiplus::Color(60, 255, 255, 255), 1.0f);
       g.FillPath(&bg_brush, &bg_path);
       g.DrawPath(&border_pen, &bg_path);
 
@@ -238,7 +238,7 @@ void DesktopLyricsWindow::Render() {
         Gdiplus::SolidBrush pill_brush(
             hover_btn_ == i
                 ? Gdiplus::Color(96, 255, 255, 255)
-                : (is_lock_active ? Gdiplus::Color(72, 56, 189, 248)
+                : (is_lock_active ? Gdiplus::Color(80, 245, 194, 107)
                                   : Gdiplus::Color(38, 255, 255, 255)));
         g.FillPath(&pill_brush, &pill);
 
@@ -340,13 +340,13 @@ void DesktopLyricsWindow::Render() {
     Gdiplus::LinearGradientBrush karaoke_brush(
         Gdiplus::PointF(left_x, 0.0f),
         Gdiplus::PointF(left_x + text_w, 0.0f),
-        Gdiplus::Color(255, 56, 189, 248),
-        Gdiplus::Color(255, 255, 255, 255));
+        Gdiplus::Color(255, 255, 244, 214),
+        Gdiplus::Color(215, 255, 255, 255));
     Gdiplus::Color colors[4] = {
-        Gdiplus::Color(255, 56, 189, 248),
-        Gdiplus::Color(255, 168, 85, 247),
-        Gdiplus::Color(255, 255, 255, 255),
-        Gdiplus::Color(255, 255, 255, 255),
+        Gdiplus::Color(255, 255, 244, 214),
+        Gdiplus::Color(255, 245, 194, 107),
+        Gdiplus::Color(215, 255, 255, 255),
+        Gdiplus::Color(215, 255, 255, 255),
     };
     Gdiplus::REAL stops[4] = {0.0f, p, p2, 1.0f};
     karaoke_brush.SetInterpolationColors(colors, stops, 4);

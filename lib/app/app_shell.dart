@@ -7,6 +7,7 @@ import '../core/state/player_provider.dart';
 import '../design_system/ambient_background.dart';
 import '../design_system/cover_art.dart';
 import '../design_system/liquid_dock.dart';
+import '../design_system/lite_music_logo.dart';
 import '../design_system/squircle_border.dart';
 import '../design_system/windows_title_bar.dart';
 import '../features/home/home_page.dart';
@@ -127,7 +128,9 @@ class _AuraAppShellState extends ConsumerState<AuraAppShell> {
                 top: false,
                 child: Center(
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 680),
+                    constraints: BoxConstraints(
+                      maxWidth: isDesktop ? 820 : 680,
+                    ),
                     child: LiquidDock(
                       scrollVelocity: _scrollVelocity,
                       cover: ProceduralCoverArt(
@@ -136,9 +139,18 @@ class _AuraAppShellState extends ConsumerState<AuraAppShell> {
                         radius: 14,
                         imageUrl: track?.coverUrl,
                       ),
-                      title: track?.title ?? 'AuraMusic',
+                      title: track?.title ?? 'Lite Music',
                       artist: track?.artist ?? '点击探索音乐',
                       isPlaying: state.isPlaying,
+                      progress: state.progress,
+                      currentLyric:
+                          (track != null &&
+                              track.lyrics.isNotEmpty &&
+                              state.activeLyric < track.lyrics.length)
+                          ? track.lyrics[state.activeLyric]
+                          : '',
+                      lyricKey: '${track?.id ?? ''}_${state.activeLyric}',
+                      onSeek: notifier.seek,
                       onTap: () => _openImmersivePlayer(context),
                       onPlayPause: notifier.togglePlay,
                       onNext: notifier.nextTrack,
@@ -197,14 +209,24 @@ class _AuraAppShellState extends ConsumerState<AuraAppShell> {
                 children: [
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: Text(
-                      'AuraMusic',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900,
-                        color: primaryColor,
-                        letterSpacing: -0.5,
-                      ),
+                    child: Row(
+                      children: [
+                        const LiteMusicLogo(size: 30),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Lite Music',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w900,
+                              color: primaryColor,
+                              letterSpacing: -0.5,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 24),

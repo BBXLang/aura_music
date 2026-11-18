@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 
 import '../audio/audio_engine.dart';
 import '../audio/ohos_audio_bridge.dart';
@@ -43,6 +45,8 @@ class PlayerState {
   /// Creates a [PlayerState].
   const PlayerState({
     required this.tracks,
+    this.hotTracks = const [],
+    this.searchResults = const [],
     required this.playlists,
     required this.sources,
     required this.queueName,
@@ -63,6 +67,8 @@ class PlayerState {
   });
 
   final List<Track> tracks;
+  final List<Track> hotTracks;
+  final List<Track> searchResults;
   final List<Playlist> playlists;
   final List<SourcePlugin> sources;
   final String queueName;
@@ -102,6 +108,8 @@ class PlayerState {
   /// Returns a copy of this state with the specified fields updated.
   PlayerState copyWith({
     List<Track>? tracks,
+    List<Track>? hotTracks,
+    List<Track>? searchResults,
     List<Playlist>? playlists,
     List<SourcePlugin>? sources,
     String? queueName,
@@ -122,6 +130,8 @@ class PlayerState {
   }) {
     return PlayerState(
       tracks: tracks ?? this.tracks,
+      hotTracks: hotTracks ?? this.hotTracks,
+      searchResults: searchResults ?? this.searchResults,
       playlists: playlists ?? this.playlists,
       sources: sources ?? this.sources,
       queueName: queueName ?? this.queueName,
@@ -178,18 +188,27 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     _initialized = true;
 
     final savedTracks = _storage.loadTracks();
+    final savedHotTracks = _storage.loadHotTracks();
     final savedPlaylists = _storage.loadPlaylists();
     final savedActiveQueue = _storage.loadActiveQueue();
     final savedHistory = _storage.loadPlayHistory();
     final savedQueues = _storage.loadRecentQueues();
     final savedSources = _storage.loadSources();
+    final savedTokens = _storage.loadOAuthTokens() ?? const <String, String>{};
     final savedSettings = _storage.loadSettings();
 
     List<Track>? mergedTracks;
-    if (savedTracks != null) {
+    if (savedTracks != null || savedHotTracks != null) {
       final byId = <String, Track>{for (final t in state.tracks) t.id: t};
-      for (final t in savedTracks) {
-        byId[t.id] = t;
+      if (savedHotTracks != null) {
+        for (final t in savedHotTracks) {
+          byId[t.id] = t;
+        }
+      }
+      if (savedTracks != null) {
+        for (final t in savedTracks) {
+          byId[t.id] = t;
+        }
       }
       mergedTracks = List<Track>.unmodifiable(byId.values);
     }
@@ -214,8 +233,24 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       }
     }
 
+    List<SourcePlugin>? sanitizedSources;
+    if (savedSources != null) {
+      sanitizedSources = savedSources
+          .map((s) {
+            final hasToken = s.id == 'huawei'
+                ? (savedTokens['sidecar_huawei_session']?.trim().isNotEmpty ??
+                      false)
+                : (savedTokens[s.id]?.trim().isNotEmpty ?? false);
+            return s.connected && !hasToken ? s.copyWith(connected: false) : s;
+          })
+          .toList(growable: false);
+    }
+
     state = state.copyWith(
       tracks: mergedTracks,
+      hotTracks: savedHotTracks != null
+          ? List<Track>.unmodifiable(savedHotTracks)
+          : null,
       playlists: savedPlaylists != null
           ? List<Playlist>.unmodifiable(savedPlaylists)
           : null,
@@ -245,8 +280,8 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
               ),
             )
           : null,
-      sources: savedSources != null
-          ? List<SourcePlugin>.unmodifiable(savedSources)
+      sources: sanitizedSources != null
+          ? List<SourcePlugin>.unmodifiable(sanitizedSources)
           : null,
       ambientEnabled: savedSettings?.ambientEnabled,
       isDark: savedSettings?.isDark,
@@ -385,6 +420,8 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
   static PlayerState _createEmptyState() {
     return const PlayerState(
       tracks: [],
+      hotTracks: [],
+      searchResults: [],
       playlists: [
         Playlist(
           id: 'pl_local',
@@ -418,6 +455,8 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
 
     return PlayerState(
       tracks: List<Track>.unmodifiable(sampleTracks),
+      hotTracks: List<Track>.unmodifiable(sampleTracks),
+      searchResults: const [],
       playlists: [
         Playlist(
           id: 'pl_local',
@@ -443,7 +482,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
           id: 'netease',
           name: '网易云音源插件',
           version: '2.4.0',
-          connected: true,
+          connected: false,
           tierLabel: 'Hi-Res',
         ),
         SourcePlugin(
@@ -457,7 +496,7 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
           id: 'apple',
           name: 'Spatial Audio 桥接',
           version: '1.2.0',
-          connected: true,
+          connected: false,
           tierLabel: 'AudioVivid',
         ),
       ],
@@ -699,21 +738,105 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     }
   }
 
+  /// Toggles the liked status of [trackId] across library, hot tracks, and search results.
+  void toggleTrackLike(String trackId) {
+    Track updateLike(Track t) =>
+        t.id == trackId ? t.copyWith(liked: !t.liked) : t;
+
+    final updatedTracks = state.tracks.map(updateLike).toList(growable: false);
+    final updatedHot = state.hotTracks.map(updateLike).toList(growable: false);
+    final updatedSearch = state.searchResults
+        .map(updateLike)
+        .toList(growable: false);
+
+    state = state.copyWith(
+      tracks: List<Track>.unmodifiable(updatedTracks),
+      hotTracks: List<Track>.unmodifiable(updatedHot),
+      searchResults: List<Track>.unmodifiable(updatedSearch),
+    );
+    _persistTracks();
+    _persistHotTracks();
+  }
+
   /// Toggles the liked status of the currently playing track.
   void toggleLike() {
     final currentId = state.currentTrackId;
     if (currentId == null) return;
+    toggleTrackLike(currentId);
+  }
 
-    final updatedTracks = state.tracks
-        .map(
-          (track) => track.id == currentId
-              ? track.copyWith(liked: !track.liked)
-              : track,
-        )
-        .toList(growable: false);
+  /// Inserts [track] immediately after the current track in the active queue.
+  ///
+  /// If the queue is currently empty, starts playing [track] right away.
+  void playNextInQueue(Track track) {
+    final tracksById = <String, Track>{for (final t in state.tracks) t.id: t};
+    var tracksChanged = false;
+    if (!tracksById.containsKey(track.id)) {
+      tracksById[track.id] = track;
+      tracksChanged = true;
+    }
+    if (tracksChanged) {
+      state = state.copyWith(
+        tracks: List<Track>.unmodifiable(tracksById.values),
+      );
+      _persistTracks();
+    }
 
-    state = state.copyWith(tracks: updatedTracks);
-    _persistTracks();
+    if (state.queue.isEmpty) {
+      playTrack(track.id);
+      return;
+    }
+
+    final currentId = state.currentTrackId;
+    if (currentId == track.id) return;
+
+    final updated = List<String>.from(state.queue)..remove(track.id);
+    final nextCurrentPos = currentId == null
+        ? state.queuePos.clamp(0, updated.length - 1)
+        : updated.indexOf(currentId).clamp(0, updated.length - 1);
+    final insertAt = (nextCurrentPos + 1).clamp(0, updated.length);
+    updated.insert(insertAt, track.id);
+
+    state = state.copyWith(
+      queue: List<String>.unmodifiable(updated),
+      queuePos: nextCurrentPos,
+    );
+    _persistActiveQueue();
+  }
+
+  /// Adds [track] to the playlist identified by [playlistId] and persists.
+  bool addTrackToPlaylist(String playlistId, Track track) {
+    final plIndex = state.playlists.indexWhere((pl) => pl.id == playlistId);
+    if (plIndex < 0) return false;
+
+    final hasTrack = state.tracks.any((t) => t.id == track.id);
+    final updatedTracks = hasTrack
+        ? state.tracks
+        : List<Track>.unmodifiable([...state.tracks, track]);
+
+    final targetPlaylist = state.playlists[plIndex];
+    final alreadyInPlaylist = targetPlaylist.trackIds.contains(track.id);
+    final updatedPlaylists = List<Playlist>.from(state.playlists);
+    if (!alreadyInPlaylist) {
+      updatedPlaylists[plIndex] = targetPlaylist.copyWith(
+        trackIds: List<String>.unmodifiable([
+          ...targetPlaylist.trackIds,
+          track.id,
+        ]),
+      );
+    }
+
+    state = state.copyWith(
+      tracks: updatedTracks,
+      playlists: List<Playlist>.unmodifiable(updatedPlaylists),
+    );
+    if (!hasTrack) {
+      _persistTracks();
+    }
+    if (!alreadyInPlaylist) {
+      _persistPlaylists();
+    }
+    return !alreadyInPlaylist;
   }
 
   /// Cycles [PlayerState.playMode] in order: `loopList -> loopOne -> playOnce`.
@@ -1089,28 +1212,83 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     return true;
   }
 
-  /// Parses a community JS plugin script or JSON manifest [jsOrJson], adds or
-  /// updates the corresponding [SourcePlugin], and persists to storage.
-  Future<bool> importPluginScript(String jsOrJson) async {
-    final trimmed = jsOrJson.trim();
+  /// Parses a community JS plugin script, JSON manifest, or remote URL [input],
+  /// adds or updates the corresponding [SourcePlugin], and persists to storage.
+  Future<bool> importPluginScript(
+    String input, {
+    http.Client? httpClient,
+  }) async {
+    final trimmed = input.trim();
     if (trimmed.isEmpty) return false;
+
+    String payload = trimmed;
+    String? importUrl;
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      final uri = Uri.tryParse(trimmed);
+      if (uri == null || uri.host.isEmpty) return false;
+      importUrl = trimmed;
+      final client = httpClient ?? http.Client();
+      try {
+        final response = await client
+            .get(uri)
+            .timeout(const Duration(seconds: 15));
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          return false;
+        }
+        payload = utf8.decode(response.bodyBytes, allowMalformed: true).trim();
+        if (payload.isEmpty) return false;
+      } catch (_) {
+        return false;
+      } finally {
+        if (httpClient == null) {
+          client.close();
+        }
+      }
+    }
 
     CommunityPluginManifest manifest;
     try {
-      manifest = CommunityPluginManifest.parse(trimmed);
+      manifest = CommunityPluginManifest.parse(payload);
     } catch (_) {
       return false;
     }
 
-    final existingIndex = state.sources.indexWhere((s) => s.id == manifest.id);
+    var pluginName = manifest.name;
+    var pluginId = manifest.id;
+    if (importUrl != null && pluginName == 'Unnamed Plugin') {
+      final uri = Uri.parse(importUrl);
+      final rawSeg = uri.pathSegments.isNotEmpty
+          ? uri.pathSegments.last
+          : uri.host;
+      final cleaned = rawSeg.replaceAll(
+        RegExp(r'\.(js|json)$', caseSensitive: false),
+        '',
+      );
+      if (cleaned.isNotEmpty) {
+        pluginName = cleaned;
+        if (pluginId == 'unnamed_plugin' || pluginId == 'community_plugin') {
+          pluginId = cleaned
+              .toLowerCase()
+              .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+              .replaceAll(RegExp(r'^_+|_+$'), '');
+          if (pluginId.isEmpty) pluginId = 'remote_plugin';
+        }
+      }
+    }
+
+    final existingIndex = state.sources.indexWhere((s) => s.id == pluginId);
     final plugin = SourcePlugin(
-      id: manifest.id,
-      name: manifest.name,
+      id: pluginId,
+      name: pluginName,
       version: manifest.version,
       connected: existingIndex >= 0
           ? state.sources[existingIndex].connected
           : false,
-      tierLabel: manifest.apiBase.isNotEmpty ? 'JS 插件 · HTTP' : 'JS 插件',
+      tierLabel: importUrl != null
+          ? 'JS 插件 · URL'
+          : (manifest.apiBase.isNotEmpty ? 'JS 插件 · HTTP' : 'JS 插件'),
+      enabled: existingIndex >= 0 ? state.sources[existingIndex].enabled : true,
+      importUrl: importUrl,
     );
 
     final updatedSources = List<SourcePlugin>.from(state.sources);
@@ -1127,8 +1305,11 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     return true;
   }
 
-  /// Marks [sourceId] as OAuth-authorized and optionally persists [token].
+  /// Marks [sourceId] as OAuth-authorized when a non-empty [token] is provided.
   Future<void> authorizeOAuth(String sourceId, {String? token}) async {
+    final cleanToken = token?.trim() ?? '';
+    if (cleanToken.isEmpty) return;
+
     final updated = state.sources
         .map(
           (source) =>
@@ -1138,12 +1319,44 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     state = state.copyWith(sources: List<SourcePlugin>.unmodifiable(updated));
     await _storage.saveSources(state.sources);
 
-    if (token != null && token.trim().isNotEmpty) {
-      final existingTokens = Map<String, String>.from(
-        _storage.loadOAuthTokens() ?? const {},
-      );
-      existingTokens[sourceId] = token.trim();
-      await _storage.saveOAuthTokens(existingTokens);
+    final existingTokens = Map<String, String>.from(
+      _storage.loadOAuthTokens() ?? const {},
+    );
+    existingTokens[sourceId] = cleanToken;
+    await _storage.saveOAuthTokens(existingTokens);
+  }
+
+  /// Toggles whether the source plugin with [sourceId] is enabled for playback/search.
+  void toggleSourceEnabled(String sourceId) {
+    final updated = state.sources
+        .map(
+          (source) => source.id == sourceId
+              ? source.copyWith(enabled: !source.enabled)
+              : source,
+        )
+        .toList(growable: false);
+    state = state.copyWith(sources: List<SourcePlugin>.unmodifiable(updated));
+    _persistSources();
+  }
+
+  /// Removes the source plugin with [sourceId] and clears any associated tokens.
+  Future<void> removeSource(String sourceId) async {
+    final updated = state.sources
+        .where((source) => source.id != sourceId)
+        .toList(growable: false);
+    state = state.copyWith(sources: List<SourcePlugin>.unmodifiable(updated));
+    await _storage.saveSources(state.sources);
+
+    final tokens = Map<String, String>.from(
+      _storage.loadOAuthTokens() ?? const {},
+    );
+    if (tokens.remove(sourceId) != null) {
+      await _storage.saveOAuthTokens(tokens);
+    }
+
+    if (sourceId == 'huawei') {
+      await _sidecar?.dispose();
+      _sidecar = null;
     }
   }
 
@@ -1254,6 +1467,10 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     unawaited(_storage.saveTracks(state.tracks));
   }
 
+  void _persistHotTracks() {
+    unawaited(_storage.saveHotTracks(state.hotTracks));
+  }
+
   void _persistPlaylists() {
     unawaited(_storage.savePlaylists(state.playlists));
   }
@@ -1347,17 +1564,59 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     _sidecar = client;
     final verified = await client.verifySession();
     if (!mounted) return false;
+    final existingHuawei = state.sources
+        .where((s) => s.id == 'huawei')
+        .firstOrNull;
     final plugin = SourcePlugin(
       id: 'huawei',
       name: '华为音乐 (Sidecar)',
       version: '1.0.0',
       connected: verified,
       tierLabel: verified ? 'Sidecar 已登录' : '待 OAuth 登录',
+      enabled: existingHuawei?.enabled ?? true,
     );
     final updated = [...state.sources.where((s) => s.id != 'huawei'), plugin];
     state = state.copyWith(sources: List<SourcePlugin>.unmodifiable(updated));
     _persistSources();
+    if (state.hotTracks.isEmpty) {
+      unawaited(refreshHotTracks());
+    }
     return true;
+  }
+
+  /// Refreshes home chart [PlayerState.hotTracks] from Sidecar without altering
+  /// [PlayerState.searchResults].
+  Future<void> refreshHotTracks() async {
+    if (_sidecar == null && _sidecarConnecting != null) {
+      await _sidecarConnecting;
+    }
+    final client = _sidecar;
+    if (client == null || !mounted) return;
+    final hwSource = state.sources.where((s) => s.id == 'huawei').firstOrNull;
+    if (hwSource != null && !hwSource.enabled) return;
+
+    try {
+      final raw = await client.search('热歌', pageSize: 30);
+      if (raw.isEmpty || !mounted) return;
+      final filtered = raw
+          .where((t) => t.title.trim() != '热歌')
+          .toList(growable: false);
+      final curated = filtered.isNotEmpty ? filtered : raw;
+      final existingById = <String, Track>{
+        for (final t in state.tracks) t.id: t,
+      };
+      for (final t in curated) {
+        existingById.putIfAbsent(t.id, () => t);
+      }
+      state = state.copyWith(
+        hotTracks: List<Track>.unmodifiable(curated),
+        tracks: List<Track>.unmodifiable(existingById.values),
+      );
+      _persistHotTracks();
+      _persistTracks();
+    } catch (_) {
+      // Leave existing hotTracks untouched on transient network failure.
+    }
   }
 
   /// Triggers the Sidecar native WebView OAuth login flow.
@@ -1378,21 +1637,30 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
         .toList(growable: false);
     state = state.copyWith(sources: List<SourcePlugin>.unmodifiable(updated));
     _persistSources();
+    if (state.hotTracks.isEmpty) {
+      unawaited(refreshHotTracks());
+    }
     return true;
   }
 
-  /// Searches the connected Sidecar source and merges results into [state.tracks].
+  /// Searches the connected Sidecar source and stores results in
+  /// [PlayerState.searchResults] without overwriting [PlayerState.hotTracks].
   Future<List<Track>> searchSidecar(String query) async {
+    final hwSource = state.sources.where((s) => s.id == 'huawei').firstOrNull;
+    if (hwSource != null && !hwSource.enabled) return const [];
     final client = _sidecar;
     if (client == null || query.trim().isEmpty) return const [];
     final results = await client.search(query.trim());
-    if (results.isEmpty || !mounted) return results;
+    if (!mounted) return results;
     final existing = state.tracks.map((t) => t.id).toSet();
     final added = results.where((t) => !existing.contains(t.id)).toList();
+    state = state.copyWith(
+      searchResults: List<Track>.unmodifiable(results),
+      tracks: added.isNotEmpty
+          ? List<Track>.unmodifiable([...state.tracks, ...added])
+          : null,
+    );
     if (added.isNotEmpty) {
-      state = state.copyWith(
-        tracks: List<Track>.unmodifiable([...state.tracks, ...added]),
-      );
       _persistTracks();
     }
     return results;

@@ -1,6 +1,7 @@
 import 'package:aura_music/design_system/ambient_background.dart';
 import 'package:aura_music/design_system/cover_art.dart';
 import 'package:aura_music/design_system/liquid_dock.dart';
+import 'package:aura_music/design_system/lite_music_logo.dart';
 import 'package:aura_music/design_system/morph_icon.dart';
 import 'package:aura_music/design_system/particle_effects.dart';
 import 'package:aura_music/design_system/squircle_border.dart';
@@ -271,6 +272,10 @@ void main() {
                   title: 'Nebula Drift',
                   artist: 'Aura Artist',
                   isPlaying: true,
+                  progress: 0.45,
+                  currentLyric: '穿过尘埃与微光',
+                  lyricKey: 1,
+                  onSeek: (_) {},
                   onTap: () => tapCount++,
                   onPlayPause: () => playPauseCount++,
                   onNext: () => nextCount++,
@@ -284,6 +289,7 @@ void main() {
 
       expect(find.text('Nebula Drift'), findsOneWidget);
       expect(find.text('Aura Artist'), findsOneWidget);
+      expect(find.text('穿过尘埃与微光'), findsOneWidget);
 
       await tester.tap(find.text('Nebula Drift'));
       expect(tapCount, 1);
@@ -296,6 +302,22 @@ void main() {
 
       await tester.tap(find.byTooltip('Queue'));
       expect(queueCount, 1);
+    });
+  });
+
+  group('LiteMusicLogo', () {
+    testWidgets('renders white base, fog painter, and equalizer icon', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(body: Center(child: LiteMusicLogo(size: 64))),
+        ),
+      );
+
+      expect(find.byType(LiteMusicLogo), findsOneWidget);
+      expect(find.byIcon(Icons.graphic_eq_rounded), findsOneWidget);
+      expect(find.byType(CustomPaint), findsWidgets);
     });
   });
 

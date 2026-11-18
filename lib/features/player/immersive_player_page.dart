@@ -10,6 +10,7 @@ import '../../design_system/morph_icon.dart';
 import '../../design_system/particle_effects.dart';
 import '../../design_system/squircle_border.dart';
 import '../../design_system/windows_title_bar.dart';
+import 'add_to_playlist_sheet.dart';
 import 'queue_sheet.dart';
 
 /// Full-screen immersive player supporting mobile 2-slide Cover/Lyrics
@@ -161,11 +162,7 @@ class _ImmersivePlayerPageState extends ConsumerState<ImmersivePlayerPage> {
               ],
             ),
           const Spacer(),
-          IconButton(
-            tooltip: '播放队列',
-            onPressed: () => showQueueSheet(context),
-            icon: Icon(Icons.queue_music_rounded, color: primaryColor),
-          ),
+          const SizedBox(width: 48),
         ],
       ),
     );
@@ -468,22 +465,38 @@ class _ImmersivePlayerPageState extends ConsumerState<ImmersivePlayerPage> {
                   ),
                   const SizedBox(height: 20),
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      Flexible(
-                        child: Text(
-                          track.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w800,
-                            color: primaryColor,
-                          ),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              track.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.w800,
+                                color: primaryColor,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${track.artist} · ${track.album}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: secondaryColor,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 12),
                       IconButton(
+                        tooltip: track.liked ? '取消红心' : '喜欢',
                         onPressed: notifier.toggleLike,
                         icon: MorphLikeIcon(
                           isLiked: track.liked,
@@ -492,10 +505,6 @@ class _ImmersivePlayerPageState extends ConsumerState<ImmersivePlayerPage> {
                         ),
                       ),
                     ],
-                  ),
-                  Text(
-                    '${track.artist} · ${track.album}',
-                    style: TextStyle(fontSize: 14, color: secondaryColor),
                   ),
                   const SizedBox(height: 18),
                   _buildProgressSection(
@@ -636,16 +645,20 @@ class _ImmersivePlayerPageState extends ConsumerState<ImmersivePlayerPage> {
     required bool showLyricsSwitch,
   }) {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        TextButton(
-          onPressed: () => _showQualitySheet(context, state, notifier),
-          child: Text(
-            state.quality.label,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: primaryColor,
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: () => _showQualitySheet(context, state, notifier),
+              child: Text(
+                state.quality.label,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: primaryColor,
+                ),
+              ),
             ),
           ),
         ),
@@ -659,20 +672,31 @@ class _ImmersivePlayerPageState extends ConsumerState<ImmersivePlayerPage> {
                 : secondaryColor,
           ),
         ),
-        if (showLyricsSwitch)
-          TextButton.icon(
-            onPressed: () => _goToPage(1),
-            icon: Icon(Icons.lyrics_rounded, size: 18, color: primaryColor),
-            label: Text(
-              '歌词',
-              style: TextStyle(fontSize: 12.5, color: primaryColor),
-            ),
+        Expanded(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              if (showLyricsSwitch)
+                TextButton.icon(
+                  onPressed: () => _goToPage(1),
+                  icon: Icon(
+                    Icons.lyrics_rounded,
+                    size: 18,
+                    color: primaryColor,
+                  ),
+                  label: Text(
+                    '歌词',
+                    style: TextStyle(fontSize: 12.5, color: primaryColor),
+                  ),
+                ),
+              IconButton(
+                tooltip: '更多操作',
+                onPressed: () =>
+                    _showMoreActionsDrawer(context, state, notifier, track),
+                icon: Icon(Icons.more_horiz_rounded, color: primaryColor),
+              ),
+            ],
           ),
-        IconButton(
-          tooltip: '更多操作',
-          onPressed: () =>
-              _showMoreActionsDrawer(context, state, notifier, track),
-          icon: Icon(Icons.more_horiz_rounded, color: primaryColor),
         ),
       ],
     );
@@ -813,9 +837,7 @@ class _ImmersivePlayerPageState extends ConsumerState<ImmersivePlayerPage> {
             label: '收藏到歌单',
             onTap: () {
               Navigator.of(sheetContext).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('已将「${track.title}」加入红心收藏')),
-              );
+              showAddToPlaylistSheet(context, track);
             },
           ),
           (
@@ -1086,7 +1108,7 @@ class _AppleMusicLyricsViewState extends State<_AppleMusicLyricsView> {
       if (ctx == null) return;
       Scrollable.ensureVisible(
         ctx,
-        alignment: 0.36,
+        alignment: 0.5,
         duration: immediate
             ? const Duration(milliseconds: 180)
             : const Duration(milliseconds: 520),
@@ -1110,37 +1132,44 @@ class _AppleMusicLyricsViewState extends State<_AppleMusicLyricsView> {
         }
         return false;
       },
-      child: ShaderMask(
-        shaderCallback: (rect) {
-          return const LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Colors.transparent,
-              Colors.black,
-              Colors.black,
-              Colors.transparent,
-            ],
-            stops: [0.0, 0.04, 0.97, 1.0],
-          ).createShader(rect);
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final verticalPad =
+              (constraints.maxHeight.isFinite
+                      ? constraints.maxHeight * 0.45
+                      : 180.0)
+                  .clamp(120.0, 320.0);
+          return ShaderMask(
+            shaderCallback: (rect) {
+              return const LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.transparent,
+                  Colors.black,
+                  Colors.black,
+                  Colors.transparent,
+                ],
+                stops: [0.0, 0.12, 0.88, 1.0],
+              ).createShader(rect);
+            },
+            blendMode: BlendMode.dstIn,
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              padding: EdgeInsets.symmetric(
+                vertical: verticalPad,
+                horizontal: 6,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (var index = 0; index < widget.lyrics.length; index++)
+                    _buildLine(index),
+                ],
+              ),
+            ),
+          );
         },
-        blendMode: BlendMode.dstIn,
-        child: SingleChildScrollView(
-          controller: _scrollController,
-          padding: const EdgeInsets.only(
-            top: 48,
-            bottom: 28,
-            left: 6,
-            right: 6,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (var index = 0; index < widget.lyrics.length; index++)
-                _buildLine(index),
-            ],
-          ),
-        ),
       ),
     );
   }

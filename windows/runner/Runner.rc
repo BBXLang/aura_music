@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.auramusic" "\0"
-            VALUE "FileDescription", "aura_music" "\0"
+            VALUE "FileDescription", "Lite Music" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "aura_music" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.auramusic. All rights reserved." "\0"
             VALUE "OriginalFilename", "aura_music.exe" "\0"
-            VALUE "ProductName", "aura_music" "\0"
+            VALUE "ProductName", "Lite Music" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END
