@@ -41,8 +41,10 @@ class _SidecarWebViewDialog extends StatefulWidget {
 class _SidecarWebViewDialogState extends State<_SidecarWebViewDialog> {
   final WebviewController _controller = WebviewController();
   StreamSubscription<String>? _urlSub;
+  StreamSubscription<dynamic>? _msgSub;
   bool _ready = false;
   String? _error;
+  String _currentUrl = '';
   bool _completed = false;
 
   String get _callbackPrefix =>
@@ -51,7 +53,19 @@ class _SidecarWebViewDialogState extends State<_SidecarWebViewDialog> {
   @override
   void initState() {
     super.initState();
+    _currentUrl = widget.url;
     _initWebView();
+  }
+
+  void _completeIfCallback(String candidate) {
+    if (_completed) return;
+    if (candidate.startsWith(_callbackPrefix) ||
+        candidate.startsWith('${widget.callbackScheme}://')) {
+      _completed = true;
+      if (mounted) {
+        Navigator.of(context).pop(candidate);
+      }
+    }
   }
 
   Future<void> _initWebView() async {
@@ -61,15 +75,42 @@ class _SidecarWebViewDialogState extends State<_SidecarWebViewDialog> {
     }
     try {
       await _controller.initialize();
-      _urlSub = _controller.url.listen((currentUrl) {
-        if (_completed) return;
-        if (currentUrl.startsWith(_callbackPrefix)) {
-          _completed = true;
-          if (mounted) {
-            Navigator.of(context).pop(currentUrl);
+      await _controller.setPopupWindowPolicy(
+        WebviewPopupWindowPolicy.sameWindow,
+      );
+      await _controller.addScriptToExecuteOnDocumentCreated('''
+        (function() {
+          var prefix = "${widget.callbackScheme}://";
+          function notify(u) {
+            if (typeof u === "string" && u.indexOf(prefix) === 0 && window.chrome && window.chrome.webview) {
+              window.chrome.webview.postMessage(u);
+            }
           }
+          var origOpen = window.open;
+          window.open = function(u) {
+            notify(u);
+            return origOpen.apply(this, arguments);
+          };
+          document.addEventListener("click", function(e) {
+            var a = e.target && e.target.closest ? e.target.closest("a") : null;
+            if (a && a.href) notify(a.href);
+          }, true);
+        })();
+      ''');
+
+      _msgSub = _controller.webMessage.listen((msg) {
+        if (msg is String) {
+          _completeIfCallback(msg);
         }
       });
+
+      _urlSub = _controller.url.listen((currentUrl) {
+        if (mounted) {
+          setState(() => _currentUrl = currentUrl);
+        }
+        _completeIfCallback(currentUrl);
+      });
+
       await _controller.loadUrl(widget.url);
       if (mounted) {
         setState(() => _ready = true);
@@ -84,6 +125,7 @@ class _SidecarWebViewDialogState extends State<_SidecarWebViewDialog> {
   @override
   void dispose() {
     _urlSub?.cancel();
+    _msgSub?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -126,8 +168,8 @@ class _SidecarWebViewDialogState extends State<_SidecarWebViewDialog> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       clipBehavior: Clip.antiAlias,
       child: SizedBox(
-        width: 520,
-        height: 640,
+        width: 540,
+        height: 660,
         child: Column(
           children: [
             Padding(
@@ -176,6 +218,17 @@ class _SidecarWebViewDialogState extends State<_SidecarWebViewDialog> {
                   : _ready
                   ? Webview(_controller)
                   : const Center(child: CircularProgressIndicator()),
+            ),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              color: Colors.black.withValues(alpha: 0.06),
+              child: Text(
+                _currentUrl,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11),
+              ),
             ),
           ],
         ),
